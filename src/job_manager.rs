@@ -1,5 +1,7 @@
+use crate::jobs;
 use crate::scheduler::Scheduler;
 use async_trait::async_trait;
+use std::future::Future;
 use std::sync::Arc;
 
 pub struct Manager<R> {
@@ -36,7 +38,37 @@ impl<R: JobsRepo> Manager<R> {
             scheduler: Arc::new(Scheduler()),
         }
     }
-    pub fn register() {}
+    // This will help to refactor later
+    // Jan's comment -  think overall you need to make use of two things you can maybe fix as preconditions
+    // the whole execution loop could be done single threadedly
+    // job never needs to be clone - no need for two owners at the same time
+    // maybe such thinking helps to eliminate some of the concurrency and ownership issues
 
-    pub async fn start() {}
+    pub async fn register<F, Fut>(&self, name: String, schedule: String, job_func: F)
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
+    {
+        //TODO: Job is not implemented yet
+        //let job = job::new(schedule.as_str(), move |_uuid, _l| {
+        let repo = self.repo.clone();
+        let name = name.clone();
+        let _ = Box::pin(async move {
+            if let Some(job_info) = repo.get_job_info(&name).await {
+                if let Ok(new_state) = job_func(job_info.state).await {
+                    let _ = repo.save_state(&name, new_state.clone()).await;
+                    let _ = repo.commit(&name, new_state).await;
+                }
+            }
+        });
+        //})?;
+        //TODO: Implement Scheduler
+        //self.scheduler.add(job).await?;
+    }
+
+    pub async fn start_all(&self) -> anyhow::Result<()> {
+        //TODO: Implement Scheduler
+        //self.scheduler.start().await?;
+        Ok(())
+    }
 }
