@@ -1,5 +1,5 @@
-use crate::jobs;
 use crate::scheduler::Scheduler;
+use anyhow::Error;
 use async_trait::async_trait;
 use std::future::Future;
 use std::sync::Arc;
@@ -10,6 +10,7 @@ pub struct Manager<R> {
     scheduler: Arc<Scheduler>,
 }
 
+#[derive(Debug)]
 pub struct JobCfg {
     pub check_sec: u64,
     pub lock_ttl_sec: u64,
@@ -44,7 +45,12 @@ impl<R: JobsRepo> Manager<R> {
     // job never needs to be clone - no need for two owners at the same time
     // maybe such thinking helps to eliminate some of the concurrency and ownership issues
 
-    pub async fn register<F, Fut>(&self, name: String, schedule: String, job_func: F)
+    pub async fn register<F, Fut>(
+        &self,
+        name: String,
+        schedule: String,
+        job_func: F,
+    ) -> anyhow::Result<()>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
@@ -53,21 +59,25 @@ impl<R: JobsRepo> Manager<R> {
         //let job = job::new(schedule.as_str(), move |_uuid, _l| {
         let repo = self.repo.clone();
         let name = name.clone();
-        let _ = Box::pin(async move {
+        async move {
             if let Some(job_info) = repo.get_job_info(&name).await {
                 if let Ok(new_state) = job_func(job_info.state).await {
-                    let _ = repo.save_state(&name, new_state.clone()).await;
-                    let _ = repo.commit(&name, new_state).await;
+                    repo.save_state(&name, new_state.clone()).await?;
+                    repo.commit(&name, new_state).await?;
                 }
             }
-        });
-        //})?;
-        //TODO: Implement Scheduler
+            Ok::<(), anyhow::Error>(())
+        };
+        //});
+
         //self.scheduler.add(job).await?;
+
+        Ok(())
     }
 
-    pub async fn start_all(&self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> anyhow::Result<()> {
         //TODO: Implement Scheduler
+        println!("Starting all scheduled jobs...");
         //self.scheduler.start().await?;
         Ok(())
     }
