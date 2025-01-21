@@ -1,42 +1,42 @@
+use crate::jobs::JobMetadata;
 use crate::scheduler::Scheduler;
+use crate::{jobs, JobName};
 use anyhow::Error;
 use async_trait::async_trait;
+use cron::Schedule;
 use std::future::Future;
 use std::sync::Arc;
-
+use std::time::Duration;
+use tokio::sync::Mutex;
+#[derive(Clone)]
 pub struct Manager<R> {
     job_instance: String,
     repo: Arc<R>,
-    scheduler: Arc<Scheduler>,
+    scheduler: Arc<Mutex<Scheduler>>,
 }
 
 #[derive(Debug)]
 pub struct JobCfg {
-    pub check_sec: u64,
-    pub lock_ttl_sec: u64,
-    pub schedule: String,
-    pub enabled: bool,
-}
-
-pub struct JobInfo {
-    // TODO : I need to think more on this more details of the job needed
-    pub state: Vec<u8>,
+    pub name: JobName,
+    pub check_interval: Duration,
+    pub lock_ttl: Duration,
+    pub schedule: Schedule,
 }
 
 #[async_trait]
 pub trait JobsRepo {
-    async fn get_job_info(&self, name: &str) -> Option<JobInfo>;
+    async fn get_job_info(&self, name: &str) -> Option<JobMetadata>;
     async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()>;
     async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()>;
     async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<()>;
 }
 
-impl<R: JobsRepo> Manager<R> {
+impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
     pub fn new(job_instance: String, repo: R) -> Self {
         Manager {
             job_instance,
             repo: Arc::new(repo),
-            scheduler: Arc::new(Scheduler()),
+            scheduler: Arc::new(Mutex::new(Scheduler::new())),
         }
     }
     // This will help to refactor later
@@ -46,32 +46,48 @@ impl<R: JobsRepo> Manager<R> {
     // maybe such thinking helps to eliminate some of the concurrency and ownership issues
 
     pub async fn register<F, Fut>(
-        &self,
+        &mut self,
         name: String,
-        schedule: String,
+        job_cfg: JobCfg,
         job_func: F,
     ) -> anyhow::Result<()>
     where
-        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
     {
         //TODO: Job is not implemented yet
-        //let job = job::new(schedule.as_str(), move |_uuid, _l| {
         let repo = self.repo.clone();
+        let job_func = job_func.clone();
         let name = name.clone();
-        async move {
-            if let Some(job_info) = repo.get_job_info(&name).await {
-                if let Ok(new_state) = job_func(job_info.state).await {
-                    repo.save_state(&name, new_state.clone()).await?;
-                    repo.commit(&name, new_state).await?;
+        let scheduler = self.scheduler.clone();
+        let mut scheduler = scheduler.lock().await;
+        let job = jobs::new(job_cfg, move |_uuid| {
+            let repo = repo.clone();
+            let name = name.clone();
+            let value = job_func.clone();
+            async move {
+                if let Some(job_info) = repo.get_job_info(&name).await {
+                    let state = job_info.state.lock().unwrap().clone();
+                    if let Ok(new_state) = value(state).await {
+                        repo.save_state(&name, new_state.clone()).await?;
+                        repo.commit(&name, new_state.clone()).await?;
+                        Ok(new_state)
+                    } else {
+                        Err(anyhow::anyhow!("Job function failed").into())
+                    }
+                } else {
+                    Err(anyhow::anyhow!("Job info not found").into())
                 }
             }
-            Ok::<(), anyhow::Error>(())
-        };
-        //});
+        });
 
-        //self.scheduler.add(job).await?;
-
+        let job = || async { Ok(()) }; // Example job
+        scheduler
+            .add(move || {
+                let job = job.clone();
+                Box::pin(async move { job().await })
+            })
+            .await?;
         Ok(())
     }
 
