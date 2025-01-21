@@ -1,9 +1,10 @@
-use crate::job_manager::JobCfg;
+use crate::error::JobError;
 use crate::JobName;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use std::future::Future;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -15,6 +16,45 @@ pub struct JobMetadata {
     pub schedule: Schedule,
     pub state: Arc<Mutex<Vec<u8>>>, //Todo Clarify with Jan
     pub last_run: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub struct JobCfg {
+    pub name: JobName,
+    pub check_interval: Duration,
+    pub lock_ttl: Duration,
+    pub schedule: Schedule,
+}
+
+impl JobCfg {
+    pub fn validate(&self) -> Result<(), JobError> {
+        if self.name.as_str().trim().is_empty() {
+            return Err(JobError::InvalidConfig(
+                "Job name cannot be empty.".to_string(),
+            ));
+        }
+
+        // Ensure check_interval is at least 1 second
+        if self.check_interval < Duration::from_secs(1) {
+            return Err(JobError::InvalidConfig(
+                "Check interval must be at least 1 second".to_string(),
+            ));
+        }
+
+        // Ensure lock_ttl is greater than or equal to check_interval
+        if self.lock_ttl < self.check_interval {
+            return Err(JobError::InvalidConfig(
+                "Lock TTL must be greater than or equal to the check interval".to_string(),
+            ));
+        }
+
+        let schedule_str = self.schedule.to_string();
+        if Schedule::from_str(&schedule_str).is_err() {
+            return Err(JobError::InvalidConfig("Schedule is invalid.".to_string()));
+        }
+
+        Ok(())
+    }
 }
 
 impl JobMetadata {
@@ -30,10 +70,10 @@ impl JobMetadata {
         last_run: &mut DateTime<Utc>,
         schedule: &Schedule,
         job_func: F,
-    ) -> anyhow::Result<()>
+    ) -> Result<(), JobError>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
+        Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
     {
         let now = Utc::now();
         if schedule
@@ -48,7 +88,7 @@ impl JobMetadata {
 
             Ok(())
         } else {
-            Err(anyhow::anyhow!("Job is not due to run").into())
+            Err(JobError::GenericError("Job is not due to run".to_string()))
         }
     }
 }
@@ -56,10 +96,10 @@ impl JobMetadata {
 pub(crate) fn new<F, Fut>(
     job_cfg: JobCfg,
     job_func: F,
-) -> impl FnOnce() -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>
+) -> impl FnOnce() -> Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>
 where
     F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
+    Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
 {
     let mut state = Vec::default();
     let mut last_run = Utc::now();

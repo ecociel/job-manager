@@ -1,11 +1,10 @@
-use crate::jobs::JobMetadata;
+use crate::error::JobError;
+use crate::jobs;
+use crate::jobs::{JobCfg, JobMetadata};
 use crate::scheduler::Scheduler;
-use crate::{jobs, JobName};
 use async_trait::async_trait;
-use cron::Schedule;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 #[derive(Clone)]
 pub struct Manager<R> {
@@ -14,20 +13,12 @@ pub struct Manager<R> {
     scheduler: Arc<Mutex<Scheduler>>,
 }
 
-#[derive(Debug)]
-pub struct JobCfg {
-    pub name: JobName,
-    pub check_interval: Duration,
-    pub lock_ttl: Duration,
-    pub schedule: Schedule,
-}
-
 #[async_trait]
 pub trait JobsRepo {
     async fn get_job_info(&self, name: &str) -> Option<JobMetadata>;
-    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()>;
-    async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()>;
-    async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<()>;
+    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError>;
+    async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError>;
+    async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<(), JobError>;
 }
 
 impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
@@ -49,15 +40,14 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
         name: String,
         job_cfg: JobCfg,
         job_func: F,
-    ) -> anyhow::Result<()>
+    ) -> Result<(), JobError>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
     {
         //TODO: Job is not implemented yet
+        job_cfg.validate()?;
         let repo = self.repo.clone();
-        let job_func = job_func.clone();
-        let name = name.clone();
         let scheduler = self.scheduler.clone();
         let mut scheduler = scheduler.lock().await;
         let job = jobs::new(job_cfg, move |_uuid| {
@@ -67,15 +57,22 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
             async move {
                 if let Some(job_info) = repo.get_job_info(&name).await {
                     let state = job_info.state.lock().unwrap().clone();
-                    if let Ok(new_state) = value(state).await {
-                        repo.save_state(&name, new_state.clone()).await?;
-                        repo.commit(&name, new_state.clone()).await?;
-                        Ok(new_state)
-                    } else {
-                        Err(anyhow::anyhow!("Job function failed").into())
+                    match value(state).await {
+                        Ok(new_state) => {
+                            if let Err(_) = repo.save_state(&name, new_state.clone()).await {
+                                return Err(JobError::SaveStateFailed(name));
+                            }
+
+                            if let Err(_) = repo.commit(&name, new_state.clone()).await {
+                                return Err(JobError::CommitStateFailed(name));
+                            }
+
+                            Ok(new_state)
+                        }
+                        Err(e) => Err(JobError::JobExecutionFailed(format!("{}", e))),
                     }
                 } else {
-                    Err(anyhow::anyhow!("Job info not found").into())
+                    Err(JobError::JobInfoNotFound(name))
                 }
             }
         });
@@ -86,11 +83,12 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
                 let job = job.clone();
                 Box::pin(async move { job().await })
             })
-            .await?;
+            .await
+            .map_err(|e| JobError::SchedulerError(format!("{}", e)))?;
         Ok(())
     }
 
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&self) -> anyhow::Result<(), JobError> {
         //TODO: Implement Scheduler
         println!("Starting all scheduled jobs...");
         //self.scheduler.start().await?;
