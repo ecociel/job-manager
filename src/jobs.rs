@@ -26,8 +26,8 @@ impl JobMetadata {
         false
     }
     pub(crate) async fn run<F, Fut>(
-        state: &mut Vec<u8>,          // Mutable reference to state
-        last_run: &mut DateTime<Utc>, // Mutable reference to last_run
+        state: &mut Vec<u8>,
+        last_run: &mut DateTime<Utc>,
         schedule: &Schedule,
         job_func: F,
     ) -> anyhow::Result<()>
@@ -42,13 +42,8 @@ impl JobMetadata {
             .next()
             .map_or(false, |next_run| next_run <= now)
         {
-            // Clone the current state to pass into the job function
             let new_state = job_func(state.clone()).await?;
-
-            // Update the state
             *state = new_state;
-
-            // Update the last run time
             *last_run = now;
 
             Ok(())
@@ -66,12 +61,10 @@ where
     F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
 {
-    // Initialize job metadata
-    let mut state = Vec::default(); // Local mutable state
-    let mut last_run = Utc::now(); // Local mutable last_run
+    let mut state = Vec::default();
+    let mut last_run = Utc::now();
     let mut schedule = job_cfg.schedule.clone();
 
-    // Create a closure to run the job
     move || {
         let job_task = async move {
             JobMetadata::run(&mut state, &mut last_run, &mut schedule, job_func).await

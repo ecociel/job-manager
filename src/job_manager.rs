@@ -1,7 +1,6 @@
 use crate::jobs::JobMetadata;
 use crate::scheduler::Scheduler;
 use crate::{jobs, JobName};
-use anyhow::Error;
 use async_trait::async_trait;
 use cron::Schedule;
 use std::future::Future;
@@ -81,7 +80,7 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
             }
         });
 
-        let job = || async { Ok(()) }; // Example job
+        let job = || async { Ok(()) };
         scheduler
             .add(move || {
                 let job = job.clone();
