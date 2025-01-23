@@ -10,35 +10,42 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use tokio::time::Duration;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let mock_repo = Arc::new(MockJobsRepo::default());
-
-    let mut manager = job_manager::Manager::new("job-instance-1".to_string(), mock_repo);
-    let job_cfg = JobCfg {
-        name: JobName("job".to_string()),
-        check_interval: Duration::from_secs(5),
-        lock_ttl: Duration::from_secs(60),
-        schedule: Schedule::from_str("*/5 * * * * *")?,
-    };
-
-    manager
-        .register("job".to_string(), job_cfg, |state| async move {
-            println!("Executing job with state: {:?}", state);
-            // Simulate some processing and return the result
-            Ok(state)
-        })
-        .await?;
-
-    manager.run().await?;
-
-    tokio::time::sleep(Duration::from_secs(20)).await;
-
-    Ok(())
+#[derive(Clone)]
+pub struct MockDb {
+    data: Arc<Mutex<Vec<u8>>>,
 }
 
-#[derive(Default)]
-pub struct MockJobsRepo;
+impl MockDb {
+    pub fn new() -> Self {
+        MockDb {
+            data: Arc::new(Mutex::new(vec![])),
+        }
+    }
+
+    pub async fn save(&self, name: &str, state: &[u8]) -> anyhow::Result<()> {
+        let mut db = self.data.lock().unwrap();
+        db.clear();
+        db.extend_from_slice(state);
+        println!("Saved state for job '{}': {:?}", name, state);
+        Ok(())
+    }
+
+    pub async fn fetch(&self) -> Vec<u8> {
+        let db = self.data.lock().unwrap();
+        db.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct MockJobsRepo {
+    db: MockDb,
+}
+
+impl MockJobsRepo {
+    pub fn new(db: MockDb) -> Self {
+        MockJobsRepo { db }
+    }
+}
 
 #[async_trait]
 impl JobsRepo for MockJobsRepo {
@@ -48,14 +55,17 @@ impl JobsRepo for MockJobsRepo {
             name: JobName(name.to_string()),
             check_interval: Duration::from_secs(60),
             lock_ttl: Duration::from_secs(300),
-            schedule: Schedule::from_str("*/5 * * * * *").expect(""),
+            schedule: Schedule::from_str("*/5 * * * * *").expect("Invalid schedule"),
             state: Arc::new(Mutex::new(vec![1, 2, 3])),
             last_run: Utc::now(),
         })
     }
 
     async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
-        println!("Saving state for {}: {:?}", name, state);
+        self.db
+            .save(name, &state)
+            .await
+            .map_err(|e| JobError::SaveStateFailed(e.to_string()))?;
         Ok(())
     }
 
@@ -68,4 +78,44 @@ impl JobsRepo for MockJobsRepo {
         println!("Creating job {} with config: {:?}", name, job_cfg);
         Ok(())
     }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    let db = MockDb::new();
+    let mock_repo = Arc::new(MockJobsRepo::new(db.clone()));
+
+    let mut manager = job_manager::Manager::new("job-instance-1".to_string(), mock_repo.clone());
+
+    let job_cfg = JobCfg {
+        name: JobName("job".to_string()),
+        check_interval: Duration::from_secs(5),
+        lock_ttl: Duration::from_secs(60),
+        schedule: Schedule::from_str("*/5 * * * * *")?,
+    };
+
+    let job_repo = mock_repo.clone();
+    manager
+        .register("job".to_string(), job_cfg, move |state| {
+            let job_repo = job_repo.clone();
+            async move {
+                println!("Executing job with state: {:?}", state);
+
+                let fetched_state = job_repo.db.fetch().await;
+                println!("Fetched previous state: {:?}", fetched_state);
+
+                job_repo
+                    .save_state("job", state.clone())
+                    .await
+                    .map_err(|e| JobError::SaveStateFailed(e.to_string()))?;
+
+                Ok(state)
+            }
+        })
+        .await?;
+
+    manager.run().await?;
+    tokio::time::sleep(Duration::from_secs(20)).await;
+
+    Ok(())
 }
