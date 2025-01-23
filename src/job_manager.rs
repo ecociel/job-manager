@@ -95,3 +95,24 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
         Ok(())
     }
 }
+
+//TODO I need to figure out this later
+
+#[async_trait]
+impl<T: JobsRepo + ?Sized + Sync + Send> JobsRepo for Arc<T> {
+    async fn get_job_info(&self, name: &str) -> Option<JobMetadata> {
+        (**self).get_job_info(name).await
+    }
+
+    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
+        (**self).save_state(name, state).await
+    }
+
+    async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
+        (**self).commit(name, state).await
+    }
+
+    async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<(), JobError> {
+        (**self).create_job(name, job_cfg).await
+    }
+}

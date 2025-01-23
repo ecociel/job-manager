@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use cron::Schedule;
-use job::job_manager::{JobCfg, JobsRepo};
+use job::error::JobError;
+use job::job_manager::JobsRepo;
 use job::jobs::JobMetadata;
+use job::JobCfg;
 use job::{job_manager, JobName};
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -19,9 +21,11 @@ async fn main() -> anyhow::Result<()> {
         lock_ttl: Duration::from_secs(60),
         schedule: Schedule::from_str("*/5 * * * * *")?,
     };
+
     manager
-        .register("job".to_string(), job_cfg, |state| {
+        .register("job".to_string(), job_cfg, |state| async move {
             println!("Executing job with state: {:?}", state);
+            // Simulate some processing and return the result
             Ok(state)
         })
         .await?;
@@ -50,17 +54,17 @@ impl JobsRepo for MockJobsRepo {
         })
     }
 
-    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()> {
+    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
         println!("Saving state for {}: {:?}", name, state);
         Ok(())
     }
 
-    async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<()> {
+    async fn commit(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
         println!("Committing state for {}: {:?}", name, state);
         Ok(())
     }
 
-    async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<()> {
+    async fn create_job(&self, name: &str, job_cfg: JobCfg) -> anyhow::Result<(), JobError> {
         println!("Creating job {} with config: {:?}", name, job_cfg);
         Ok(())
     }

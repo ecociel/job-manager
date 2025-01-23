@@ -1,9 +1,10 @@
-mod error;
+pub mod error;
 pub mod executor;
 pub mod job_manager;
 pub mod jobs;
 pub mod scheduler;
 
+pub use jobs::{JobCfg, JobMetadata};
 #[derive(Debug)]
 pub struct JobName(pub String);
 
