@@ -67,11 +67,10 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
             state: Arc::new(Mutex::new(Vec::new())),
             last_run: chrono::Utc::now(),
             retry_attempts: 0,
-            max_retries: 3,                           // Set default retry count
-            backoff_duration: Duration::from_secs(2), // Default backoff duration
+            max_retries: 3,
+            backoff_duration: Duration::from_secs(2),
         };
 
-        // Add the job to the executor for periodic execution
         job_executor.add_job(job_metadata).await;
 
         let job = jobs::new(job_cfg.clone(), move |_uuid| {
@@ -86,8 +85,8 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
                     let mut attempts = 0;
                     while result.is_err() && attempts < job_info.max_retries {
                         attempts += 1;
-                        sleep(job_info.backoff_duration).await; // Apply backoff
-                        result = job_func(state.clone()).await; // Retry job
+                        sleep(job_info.backoff_duration).await;
+                        result = job_func(state.clone()).await;
                     }
 
                     if let Err(e) = result {
