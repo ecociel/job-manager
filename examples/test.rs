@@ -49,7 +49,7 @@ impl MockJobsRepo {
 
 #[async_trait]
 impl JobsRepo for MockJobsRepo {
-    async fn get_job_info(&self, name: &str) -> Option<JobMetadata> {
+    async fn get_job_info(&self, name: &JobName) -> Option<JobMetadata> {
         println!("Fetching job info for {}", name);
         Some(JobMetadata {
             name: JobName(name.to_string()),
@@ -61,7 +61,7 @@ impl JobsRepo for MockJobsRepo {
         })
     }
 
-    async fn save_state(&self, name: &str, state: Vec<u8>) -> anyhow::Result<(), JobError> {
+    async fn save_state(&self, name: &JobName, state: Vec<u8>) -> anyhow::Result<(), JobError> {
         self.db
             .save(name, &state)
             .await

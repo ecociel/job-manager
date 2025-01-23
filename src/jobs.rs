@@ -5,9 +5,12 @@ use cron::Schedule;
 use std::future::Future;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
+#[derive(Clone)]
 pub struct JobMetadata {
     //TODO: As we proceed and more clear about implmentation we keep adding
     pub name: JobName,
@@ -16,9 +19,12 @@ pub struct JobMetadata {
     pub schedule: Schedule,
     pub state: Arc<Mutex<Vec<u8>>>, //Todo Clarify with Jan
     pub last_run: DateTime<Utc>,
+    pub retry_attempts: u32,
+    pub max_retries: u32,
+    pub backoff_duration: Duration,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JobCfg {
     pub name: JobName,
     pub check_interval: Duration,
@@ -33,15 +39,11 @@ impl JobCfg {
                 "Job name cannot be empty.".to_string(),
             ));
         }
-
-        // Ensure check_interval is at least 1 second
         if self.check_interval < Duration::from_secs(1) {
             return Err(JobError::InvalidConfig(
                 "Check interval must be at least 1 second".to_string(),
             ));
         }
-
-        // Ensure lock_ttl is greater than or equal to check_interval
         if self.lock_ttl < self.check_interval {
             return Err(JobError::InvalidConfig(
                 "Lock TTL must be greater than or equal to the check interval".to_string(),
@@ -58,14 +60,15 @@ impl JobCfg {
 }
 
 impl JobMetadata {
-    pub(crate) fn due(&self, now: DateTime<Utc>) -> bool {
+    pub fn due(&self, now: DateTime<Utc>) -> bool {
         let mut upcoming = self.schedule.upcoming(Utc).take(1);
         if let Some(next_run) = upcoming.next() {
             return next_run <= now;
         }
         false
     }
-    pub(crate) async fn run<F, Fut>(
+    pub async fn run<F, Fut>(
+        &mut self,
         state: &mut Vec<u8>,
         last_run: &mut DateTime<Utc>,
         schedule: &Schedule,
@@ -82,14 +85,30 @@ impl JobMetadata {
             .next()
             .map_or(false, |next_run| next_run <= now)
         {
-            let new_state = job_func(state.clone()).await?;
-            *state = new_state;
-            *last_run = now;
+            let mut attempt = 0;
 
-            Ok(())
-        } else {
-            Err(JobError::GenericError("Job is not due to run".to_string()))
+            loop {
+                let new_state = job_func(state.clone()).await;
+
+                match new_state {
+                    Ok(new_state) => {
+                        *state = new_state;
+                        *last_run = now;
+                        return Ok(());
+                    }
+                    Err(e) if attempt < self.max_retries => {
+                        attempt += 1;
+                        eprintln!("Job failed, retrying {}/{}", attempt, self.max_retries);
+                        sleep(self.backoff_duration).await;
+                    }
+                    Err(e) => {
+                        eprintln!("Job failed after {} attempts", self.max_retries);
+                        return Err(JobError::JobExecutionFailed(e.to_string()));
+                    }
+                }
+            }
         }
+        Err(JobError::GenericError("Job is not due to run".to_string()))
     }
 }
 
@@ -104,10 +123,28 @@ where
     let mut state = Vec::default();
     let mut last_run = Utc::now();
     let mut schedule = job_cfg.schedule.clone();
+    let mut job_metadata = JobMetadata {
+        name: job_cfg.name,
+        check_interval: job_cfg.check_interval,
+        lock_ttl: job_cfg.lock_ttl,
+        schedule: job_cfg.schedule.clone(),
+        state: Arc::new(Mutex::new(state.clone())),
+        last_run,
+        retry_attempts: 0,
+        max_retries: 3,
+        backoff_duration: Duration::from_secs(2),
+    };
 
     move || {
         let job_task = async move {
-            JobMetadata::run(&mut state, &mut last_run, &mut schedule, job_func).await
+            JobMetadata::run(
+                &mut job_metadata,
+                &mut state,
+                &mut last_run,
+                &mut schedule,
+                job_func,
+            )
+            .await
         };
 
         Box::pin(job_task)

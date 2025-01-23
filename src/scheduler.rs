@@ -1,7 +1,6 @@
 use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub struct Scheduler {
@@ -28,7 +27,7 @@ impl Scheduler {
     pub async fn start(&self) -> Result<()> {
         let jobs = self.jobs.lock().await;
         for job in jobs.iter() {
-            job(); // Execute the job
+            job();
         }
         Ok(())
     }

@@ -5,7 +5,7 @@ pub mod jobs;
 pub mod scheduler;
 
 pub use jobs::{JobCfg, JobMetadata};
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct JobName(pub String);
 
 impl JobName {

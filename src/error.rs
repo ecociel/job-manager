@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::fmt;
+use std::fmt::Debug;
 
-#[derive(Debug)]
 pub enum JobError {
     InvalidConfig(String),
     JobInfoNotFound(String),
@@ -29,4 +29,17 @@ impl fmt::Display for JobError {
         }
     }
 }
-impl Error for JobError {}
+
+impl Debug for JobError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+impl Error for JobError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            JobError::RepoError(_) => None,
+            _ => None,
+        }
+    }
+}
