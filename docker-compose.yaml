@@ -1,0 +1,22 @@
+name: job-manager
+services:
+  cassandra:
+    image: cassandra:latest
+    container_name: cassandra-job
+    ports:
+      - "9042:9042"
+    environment:
+      - CASSANDRA_USER=cassandra
+      - CASSANDRA_PASSWORD=cassandra
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: [ "CMD", "cqlsh", "-e", "describe keyspaces" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  data:
+    driver: local
+  cassandra-data:
