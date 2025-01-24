@@ -1,6 +1,6 @@
 use crate::error::JobError;
 use crate::executor::JobExecutor;
-use crate::jobs;
+use crate::{jobs, repo};
 use crate::jobs::{JobCfg, JobMetadata};
 use crate::scheduler::Scheduler;
 use crate::JobName;
@@ -10,30 +10,28 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use crate::cassandra::{RepoError, TheRepository};
+use crate::repo::Repo;
 
 #[derive(Clone)]
-pub struct Manager<R> {
+pub struct Manager<R>
+where
+    R: Repo + Send + Sync + 'static,
+{
     job_instance: String,
     repo: Arc<R>,
     scheduler: Arc<Mutex<Scheduler>>,
-    job_executor: Arc<JobExecutor>,
+    job_executor:  Arc<JobExecutor<R>>,
 }
 
-#[async_trait]
-pub trait JobsRepo {
-    async fn get_job_info(&self, name: &JobName) -> Option<JobMetadata>;
-    async fn save_state(&self, name: &JobName, state: Vec<u8>) -> anyhow::Result<(), JobError>;
-    async fn commit(&self, name: &JobName, state: Vec<u8>) -> anyhow::Result<(), JobError>;
-    async fn create_job(&self, name: &JobName, job_cfg: JobCfg) -> anyhow::Result<(), JobError>;
-}
-
-impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
+impl<R: Repo + Sync + Send + 'static> Manager<R> {
     pub fn new(job_instance: String, repo: R) -> Self {
+        let repo_arc = Arc::new(repo);
         Manager {
             job_instance,
-            repo: Arc::new(repo),
+            repo: repo_arc.clone(),
             scheduler: Arc::new(Mutex::new(Scheduler::new())),
-            job_executor: Arc::new(JobExecutor::new(Arc::new(Mutex::new(Scheduler::new())))),
+            job_executor: Arc::new(JobExecutor::new(Arc::new(Mutex::new(Scheduler::new())),repo_arc.clone())),
         }
     }
     // This will help to refactor later
@@ -52,7 +50,6 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
         F: Fn(Vec<u8>) -> Fut + Send + Sync + Clone + 'static,
         Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
     {
-        //TODO: Job is not implemented yet
         job_cfg.validate()?;
         let repo = self.repo.clone();
         let scheduler = self.scheduler.clone();
@@ -119,25 +116,5 @@ impl<R: JobsRepo + Sync + Send + 'static> Manager<R> {
         println!("Starting all scheduled jobs...");
         self.job_executor.start().await;
         Ok(())
-    }
-}
-
-//TODO I need to figure out this later
-#[async_trait]
-impl<T: JobsRepo + ?Sized + Sync + Send> JobsRepo for Arc<T> {
-    async fn get_job_info(&self, name: &JobName) -> Option<JobMetadata> {
-        (**self).get_job_info(name).await
-    }
-
-    async fn save_state(&self, name: &JobName, state: Vec<u8>) -> anyhow::Result<(), JobError> {
-        (**self).save_state(name, state).await
-    }
-
-    async fn commit(&self, name: &JobName, state: Vec<u8>) -> anyhow::Result<(), JobError> {
-        (**self).commit(name, state).await
-    }
-
-    async fn create_job(&self, name: &JobName, job_cfg: JobCfg) -> anyhow::Result<(), JobError> {
-        (**self).create_job(name, job_cfg).await
     }
 }

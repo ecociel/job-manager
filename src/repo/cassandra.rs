@@ -54,7 +54,7 @@ impl TheRepository {
         Ok(Self { session })
     }
     
-    async fn create_job(
+    pub(crate) async fn create_job(
         &self,
         name: &JobName,
         check_interval: Duration,
