@@ -2,7 +2,7 @@ pub mod error;
 pub mod executor;
 pub mod job_manager;
 pub mod jobs;
-mod repo;
+pub mod repo;
 pub mod scheduler;
 
 pub use repo::cassandra;

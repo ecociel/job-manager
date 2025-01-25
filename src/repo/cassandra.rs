@@ -8,12 +8,15 @@ use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use crate::{JobCfg, JobMetadata, JobName};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use crate::cassandra::ErrorKind::RowAlreadyExists;
+use crate::repo::Repo;
 
 #[derive(Clone, Debug)]
 pub struct TheRepository {
@@ -53,71 +56,89 @@ impl TheRepository {
 
         Ok(Self { session })
     }
-    
-    pub(crate) async fn create_job(
+
+}
+
+#[async_trait]
+impl Repo for TheRepository {
+    async fn create_job(
         &self,
         name: &JobName,
+        backoff_duration: Duration,
         check_interval: Duration,
-        lock_ttl: Duration,
-        schedule: Schedule,
-        state: Arc<Mutex<Vec<u8>>>,
         last_run: DateTime<Utc>,
+        lock_ttl: Duration,
         retry_attempts: u32,
         max_retries: u32,
-        backoff_duration: Duration,
+        schedule: Schedule,
+        state: Arc<Mutex<Vec<u8>>>,
     ) -> Result<(), RepoError> {
         let mut statement = self
             .session
-            .statement("INSERT INTO jobs (name, check_interval, lock_ttl, schedule, state, last_run, retry_attempts, max_retries, backoff_duration) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);");
-        
+            .statement("INSERT INTO job.jobs (name, backoff_duration, check_interval, last_run, lock_ttl,max_retries, retry_attempts,schedule, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);");
+
         statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
             target: name.0.clone(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(1, check_interval.as_secs() as i64).map_err(|e| RepoError {
+        statement.bind(1, backoff_duration.as_secs() as i64).map_err(|e| RepoError {
+            target: "backoff_duration".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+        statement.bind(2, check_interval.as_secs() as i32).map_err(|e| RepoError {
             target: "check_interval".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(2, lock_ttl.as_secs() as i64).map_err(|e| RepoError {
+        let last_run_epoch = last_run.naive_utc().and_utc().timestamp();
+        statement
+            .bind(3, last_run_epoch)
+            .map_err(|e| RepoError {
+                target: "last_run".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            })?;
+        statement.bind(4, lock_ttl.as_secs() as i32).map_err(|e| RepoError {
             target: "lock_ttl".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
         statement
-            .bind(3, schedule.to_string().as_str())
+            .bind(5, max_retries as i32)
             .map_err(|e| RepoError {
-                target: "schedule".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            })?;
-        
-        let state_bytes = state.lock().await.clone();
-        statement.bind(4, state_bytes).map_err(|e| RepoError {
-            target: "state".to_string(),
-            kind: ErrorKind::BindError(e.into()),
-        })?;
-        statement
-            .bind(5, last_run.to_rfc3339().as_str())
-            .map_err(|e| RepoError {
-                target: "last_run".to_string(),
+                target: "max_retries".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
         statement.bind(6, retry_attempts as i32).map_err(|e| RepoError {
             target: "retry_attempts".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(7, max_retries as i32).map_err(|e| RepoError {
-            target: "max_retries".to_string(),
+        statement.bind(7,schedule.to_string().as_str()).map_err(|e| RepoError {
+            target: "schedule".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
+        let state_bytes = state.lock().await.clone();
         statement
-            .bind(8, backoff_duration.as_secs() as i64)
+            .bind(8, state_bytes)
             .map_err(|e| RepoError {
-                target: "backoff_duration".to_string(),
+                target: "state".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
-        statement.execute().await.map_err(|e| RepoError {
-            target: "jobs".to_string(),
+        let result =statement.execute().await.map_err(|e| RepoError {
+            target: "job.jobs".to_string(),
             kind: ErrorKind::ExecuteError(e.into()),
         })?;
+
+        if let Some(row) = result.first_row() {
+            let app: bool = row.get_by_name("[applied]").map_err(|e| RepoError{
+                target: "jobs - [applied] status".to_string(),
+                kind: ExecuteError(e.into()),
+            })?;
+
+            if !app {
+                return Err(RepoError {
+                    target: name.0.clone(),
+                    kind: RowAlreadyExists
+                });
+            }
+        }
 
         Ok(())
     }
@@ -158,7 +179,7 @@ impl TheRepository {
         Ok(())
     }
 
-    async fn get_job(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
+    async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
         let query = "SELECT check_interval, lock_ttl, schedule, state, last_run, retry_attempts, max_retries, backoff_duration FROM jobs WHERE name = ?;";
         let mut statement = self.session.statement(query);
 
@@ -218,7 +239,7 @@ impl TheRepository {
     }
 
 
-    pub async fn save_state(&self, id: String, state: String) -> Result<(), RepoError> {
+    async fn save_state(&self, id: String, state: Vec<u8>) -> Result<(), RepoError> {
         let mut statement = self
             .session
             .statement("INSERT INTO icp_device.state (id, state) VALUES (?, ?) IF NOT EXISTS;");
@@ -227,7 +248,7 @@ impl TheRepository {
             target: "id".to_string(),
             kind: BindError(e.into()),
         })?;
-        statement.bind(1, state.as_str()).map_err(|e| RepoError {
+        statement.bind(1, state).map_err(|e| RepoError {
             target: "state".to_string(),
             kind: BindError(e.into()),
         })?;
@@ -254,7 +275,7 @@ impl TheRepository {
         Ok(())
     }
 
-    pub async fn fetch_state(&self, id: String) -> Result<String, RepoError> {
+    async fn fetch_state(&self, id: String) -> Result<String, RepoError> {
         let query = "SELECT state FROM icp_device.state WHERE id = ?;";
         let mut statement = self.session.statement(query);
 

@@ -10,7 +10,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JobMetadata {
     //TODO: As we proceed and more clear about implmentation we keep adding
     pub name: JobName,

@@ -15,6 +15,12 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+  manager:
+    image: job:latest
+    container_name: job
+    depends_on:
+      cassandra:
+        condition: service_healthy
 
 volumes:
   data:

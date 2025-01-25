@@ -31,24 +31,24 @@ where
     pub async fn add_job(&self, job_metadata: JobMetadata) ->  Result<(), Box<dyn std::error::Error>> {
         let mut jobs = self.jobs.lock().await;
         jobs.push(job_metadata.clone());
-        self.repository
-            .create_job(
+        eprintln!("Inside Executor -- add_job");
+        self.repository.create_job(
                 &job_metadata.name,
+                job_metadata.backoff_duration,
                 job_metadata.check_interval,
+                job_metadata.last_run,
                 job_metadata.lock_ttl,
+                job_metadata.max_retries,
+                job_metadata.retry_attempts,
                 job_metadata.schedule.clone(),
                 job_metadata.state.clone(),
-                job_metadata.last_run,
-                job_metadata.retry_attempts,
-                job_metadata.max_retries,
-                job_metadata.backoff_duration,
             )
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
 
         Ok(())
     }
-    
+
 
     pub async fn start(&self) {
         loop {

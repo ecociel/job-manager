@@ -1,16 +1,14 @@
 use crate::error::JobError;
 use crate::executor::JobExecutor;
-use crate::{jobs, repo};
+use crate::{jobs};
 use crate::jobs::{JobCfg, JobMetadata};
 use crate::scheduler::Scheduler;
 use crate::JobName;
-use async_trait::async_trait;
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
-use crate::cassandra::{RepoError, TheRepository};
 use crate::repo::Repo;
 
 #[derive(Clone)]
@@ -67,15 +65,15 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             max_retries: 3,
             backoff_duration: Duration::from_secs(2),
         };
-
-        job_executor.add_job(job_metadata).await;
-
+        eprintln!("job_metadata {:?}", job_metadata);
+        job_executor.add_job(job_metadata).await.expect("TODO: panic message");
+        eprintln!("Job added");
         let job = jobs::new(job_cfg.clone(), move |_uuid| {
             let repo = repo.clone();
             let name = job_name.clone();
             let job_func = job_func.clone();
             async move {
-                if let Some(job_info) = repo.get_job_info(&name).await {
+                if let Ok(job_info) = repo.get_job_info(&name).await {
                     let state = job_info.state.lock().await.clone();
 
                     let mut result = job_func(state.clone()).await;
@@ -90,7 +88,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                         Err(JobError::JobExecutionFailed(format!("{}", e)))
                     } else {
                         let new_state = result.unwrap();
-                        repo.save_state(&name, new_state.clone()).await?;
+                        repo.save_state(name.0.clone(), new_state.clone()).await?;
                         repo.commit(&name, new_state.clone()).await?;
                         Ok(new_state)
                     }
