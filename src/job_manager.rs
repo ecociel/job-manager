@@ -5,6 +5,7 @@ use crate::jobs::{JobCfg, JobMetadata};
 use crate::scheduler::Scheduler;
 use crate::JobName;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -136,9 +137,12 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         Ok(())
     }
 
-// pub async fn run(&self) -> Result<(), JobError> {
-//         println!("Starting all scheduled jobs...");
-//         self.job_executor.start().await;
-//         Ok(())
-//     }
+pub async fn run<F>(&self,job_func: F) -> Result<(), JobError>
+    where
+        F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send +Copy + Sync + Clone + 'static,
+    {
+        println!("Starting all scheduled jobs...");
+        self.job_executor.start(job_func).await;
+        Ok(())
+    }
 }
