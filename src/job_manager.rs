@@ -1,6 +1,5 @@
 use crate::error::JobError;
 use crate::executor::JobExecutor;
-use crate::{jobs};
 use crate::jobs::{JobCfg, JobMetadata};
 use crate::scheduler::Scheduler;
 use crate::JobName;
@@ -9,7 +8,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
 use crate::repo::Repo;
 
 #[derive(Clone)]
@@ -62,7 +60,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             eprintln!("Job not found, using default state in-memory");
             b"initializing".to_vec()
         };
-
         let job_metadata = JobMetadata {
             name: job_name.clone(),
             check_interval: job_cfg.check_interval,
@@ -87,7 +84,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
 
             async move {
                 let state = job_metadata.state.lock().await.clone();
-
                 let mut result = job_func(state.clone()).await;
                 let mut attempts = 0;
 
@@ -103,7 +99,8 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                 }
 
                 match result {
-                    Ok(new_state) => {
+                    Ok(mut new_state) => {
+                        new_state = b"completed".to_vec();
                         repo.save_and_commit_state(&job_metadata.name, new_state.clone())
                             .await
                             .map_err(|e| JobError::JobExecutionFailed(format!("Failed to save state: {}", e)))?;

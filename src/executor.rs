@@ -14,6 +14,7 @@ pub struct JobExecutor<R>
 where
     R: Repo + Send + Sync + 'static,
 {
+    id: String,
     scheduler: Arc<Mutex<Scheduler>>,
     jobs: Arc<Mutex<Vec<JobMetadata>>>,
     repository: Arc<R>,
@@ -25,6 +26,7 @@ where
 {
     pub fn new(scheduler: Arc<Mutex<Scheduler>>, repository: Arc<R>) -> Self {
         JobExecutor {
+            id:"".to_string(),
             scheduler,
             jobs: Arc::new(Mutex::new(Vec::new())),
             repository,
@@ -62,9 +64,7 @@ where
                 if job.due(now) {
                     let mut job_clone = job.clone();
                     let state_clone = job.state.clone();
-                    eprintln!(" state_clone  {:?}", state_clone);
                     tokio::spawn(async move {
-                        eprintln!("Starting job execution for: {:?}", job_clone.name);
                         let state_lock = state_clone.lock().await;
                         let mut state = state_lock.clone();
 

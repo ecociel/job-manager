@@ -27,8 +27,9 @@ impl Scheduler {
     pub async fn start(&self) -> Result<()> {
         let jobs = self.jobs.lock().await;
         for job in jobs.iter() {
-            job();
+            job().await?;
         }
         Ok(())
     }
+
 }

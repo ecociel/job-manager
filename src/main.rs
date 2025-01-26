@@ -20,7 +20,6 @@ fn main() {
             .unwrap();
 
         let mut manager = job_manager::Manager::new("job-instance-1".to_string(), repo.clone());
-        eprintln!("Job instance created");
 
         let job_cfg = JobCfg {
             name: JobName("job".to_string()),

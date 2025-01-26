@@ -146,16 +146,9 @@ impl Repo for TheRepository {
 
     async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
-            "UPDATE job.jobs SET state = ?, committed = true WHERE job_name = ?;",
+            "SELECT name FROM job.jobs WHERE name = ?;",
         );
-
-        statement.bind(0, state).map_err(|e| {
-            RepoError {
-                target: "state".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            }
-        })?;
-        statement.bind(1, name.0.as_str()).map_err(|e| {
+        statement.bind(0, name.0.as_str()).map_err(|e| {
             RepoError {
                 target: name.0.clone(),
                 kind: ErrorKind::BindError(e.into()),
@@ -169,15 +162,41 @@ impl Repo for TheRepository {
             }
         })?;
 
-        if result.first_row().is_none() {
+        if result.first_row().is_some() {
+            eprintln!("Job found. Updating state for job: {:?}", name);
+            let mut update_statement = self.session.statement(
+                "UPDATE job.jobs SET state = ? WHERE name = ?;",
+            );
+            update_statement.bind(0, state).map_err(|e| {
+                RepoError {
+                    target: "state".to_string(),
+                    kind: ErrorKind::BindError(e.into()),
+                }
+            })?;
+            update_statement.bind(1, name.0.as_str()).map_err(|e| {
+                RepoError {
+                    target: name.0.clone(),
+                    kind: ErrorKind::BindError(e.into()),
+                }
+            })?;
+
+            update_statement.execute().await.map_err(|e| {
+                RepoError {
+                    target: "job.jobs".to_string(),
+                    kind: ErrorKind::ExecuteError(e.into()),
+                }
+            })?;
+        } else {
+            eprintln!("Job not found. Cannot update state for non-existing job: {:?}", name);
             return Err(RepoError {
                 target: name.0.clone(),
-                kind: ErrorKind::RowAlreadyExists,
+                kind: ErrorKind::NotFound,
             });
         }
 
         Ok(())
     }
+
 
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
         let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state FROM jobs WHERE name = ?;";

@@ -63,12 +63,9 @@ impl JobMetadata {
     pub fn due(&self, now: DateTime<Utc>) -> bool {
         let mut upcoming = self.schedule.upcoming(Utc).take(1);
         if let Some(next_run) = upcoming.next() {
-            eprintln!("Checking if job is due: Next run at {:?}, Current time: {:?}", next_run, now);
             let tolerance = 1;
             return (next_run - now).num_seconds().abs() <= tolerance;
         }
-
-        eprintln!("No upcoming runs found.");
         false
     }
 
@@ -130,7 +127,6 @@ where
         max_retries: 3,
         backoff_duration: Duration::from_secs(2),
     };
-
     move || {
         let job_task = async move {
             JobMetadata::run(
@@ -142,7 +138,6 @@ where
             )
             .await
         };
-
         Box::pin(job_task)
     }
 }
