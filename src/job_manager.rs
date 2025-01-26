@@ -18,8 +18,8 @@ where
 {
     job_instance: String,
     repo: Arc<R>,
-    scheduler: Arc<Mutex<Scheduler>>,
-    job_executor:  Arc<JobExecutor<R>>,
+    pub scheduler: Arc<Mutex<Scheduler>>,
+    pub job_executor:  Arc<JobExecutor<R>>,
 }
 
 impl<R: Repo + Sync + Send + 'static> Manager<R> {
@@ -29,7 +29,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             job_instance,
             repo: repo_arc.clone(),
             scheduler: Arc::new(Mutex::new(Scheduler::new())),
-            job_executor: Arc::new(JobExecutor::new(Arc::new(Mutex::new(Scheduler::new())),repo_arc.clone())),
+            job_executor: Arc::new(JobExecutor::new(Arc::new(Mutex::new(Scheduler::new())), repo_arc.clone())),
         }
     }
     // This will help to refactor later
@@ -46,7 +46,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
     ) -> Result<(), JobError>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + Clone + 'static,
-        Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
+        Fut: Future<Output=anyhow::Result<Vec<u8>>> + Send + 'static,
     {
         job_cfg.validate()?;
         let repo = self.repo.clone();
@@ -54,65 +54,91 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         let mut scheduler = scheduler.lock().await;
         let job_executor = self.job_executor.clone();
 
+        let initial_state = if let Ok(job_metadata) = repo.get_job_info(&job_name).await {
+            eprintln!("Fetched job metadata: {:?}", job_metadata.state);
+            job_metadata.state.lock().await.clone()
+        } else {
+            eprintln!("Job not found, using default state in-memory");
+            b"initializing".to_vec()
+        };
+
         let job_metadata = JobMetadata {
             name: job_name.clone(),
             check_interval: job_cfg.check_interval,
             lock_ttl: job_cfg.lock_ttl,
             schedule: job_cfg.schedule.clone(),
-            state: Arc::new(Mutex::new(Vec::new())),
+            state: Arc::new(Mutex::new(initial_state)),
             last_run: chrono::Utc::now(),
             retry_attempts: 0,
             max_retries: 3,
             backoff_duration: Duration::from_secs(2),
         };
-        eprintln!("job_metadata {:?}", job_metadata);
-        job_executor.add_job(job_metadata).await.expect("TODO: panic message");
-        eprintln!("Job added");
-        let job = jobs::new(job_cfg.clone(), move |_uuid| {
+
+        job_executor
+            .add_job(job_metadata.clone())
+            .await
+            .expect("Failed to add job to executor");
+
+        let job = Arc::new(move || {
+            let job_metadata = job_metadata.clone();
             let repo = repo.clone();
-            let name = job_name.clone();
             let job_func = job_func.clone();
+
             async move {
-                if let Ok(job_info) = repo.get_job_info(&name).await {
-                    let state = job_info.state.lock().await.clone();
+                let state = job_metadata.state.lock().await.clone();
 
-                    let mut result = job_func(state.clone()).await;
-                    let mut attempts = 0;
-                    while result.is_err() && attempts < job_info.max_retries {
-                        attempts += 1;
-                        sleep(job_info.backoff_duration).await;
-                        result = job_func(state.clone()).await;
-                    }
+                let mut result = job_func(state.clone()).await;
+                let mut attempts = 0;
 
-                    if let Err(e) = result {
-                        Err(JobError::JobExecutionFailed(format!("{}", e)))
-                    } else {
-                        let new_state = result.unwrap();
-                        repo.save_state(name.0.clone(), new_state.clone()).await?;
-                        repo.commit(&name, new_state.clone()).await?;
-                        Ok(new_state)
+                while result.is_err() && attempts < job_metadata.max_retries {
+                    attempts += 1;
+                    let err = result.as_ref().err().unwrap();
+                    eprintln!(
+                        "Job '{:?}' attempt {} failed: {}. Retrying after {:?}...",
+                        job_metadata.name, attempts, err, job_metadata.backoff_duration
+                    );
+                    tokio::time::sleep(job_metadata.backoff_duration).await;
+                    result = job_func(state.clone()).await;
+                }
+
+                match result {
+                    Ok(new_state) => {
+                        repo.save_and_commit_state(&job_metadata.name, new_state.clone())
+                            .await
+                            .map_err(|e| JobError::JobExecutionFailed(format!("Failed to save state: {}", e)))?;
+                        eprintln!("Job '{:?}' completed successfully", job_metadata.name);
+                        Ok(())
                     }
-                } else {
-                    Err(JobError::JobInfoNotFound(name.as_str().to_string()))
+                    Err(e) => {
+                        eprintln!(
+                            "Job '{:?}' failed after {} retries: {}",
+                            job_metadata.name, attempts, e
+                        );
+                        Err(JobError::JobExecutionFailed(format!(
+                            "Job '{:?}' failed: {}",
+                            job_metadata.name, e
+                        )))
+                    }
                 }
             }
         });
 
-        let job = || async { Ok(()) };
         scheduler
             .add(move || {
                 let job = job.clone();
-                Box::pin(async move { job().await })
+                Box::pin(async move {
+                    job().await.map_err(|e| anyhow::Error::msg(format!("{}", e)))
+                })
             })
             .await
             .map_err(|e| JobError::SchedulerError(format!("{}", e)))?;
+
         Ok(())
     }
 
-    pub async fn run(&self) -> anyhow::Result<(), JobError> {
-        //TODO: Implement Scheduler
-        println!("Starting all scheduled jobs...");
-        self.job_executor.start().await;
-        Ok(())
-    }
+// pub async fn run(&self) -> Result<(), JobError> {
+//         println!("Starting all scheduled jobs...");
+//         self.job_executor.start().await;
+//         Ok(())
+//     }
 }

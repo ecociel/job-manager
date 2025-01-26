@@ -63,10 +63,15 @@ impl JobMetadata {
     pub fn due(&self, now: DateTime<Utc>) -> bool {
         let mut upcoming = self.schedule.upcoming(Utc).take(1);
         if let Some(next_run) = upcoming.next() {
-            return next_run <= now;
+            eprintln!("Checking if job is due: Next run at {:?}, Current time: {:?}", next_run, now);
+            let tolerance = 1;
+            return (next_run - now).num_seconds().abs() <= tolerance;
         }
+
+        eprintln!("No upcoming runs found.");
         false
     }
+
     pub async fn run<F, Fut>(
         &mut self,
         state: &mut Vec<u8>,
@@ -79,14 +84,7 @@ impl JobMetadata {
         Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
     {
         let now = Utc::now();
-        if schedule
-            .upcoming(Utc)
-            .take(1)
-            .next()
-            .map_or(false, |next_run| next_run <= now)
-        {
             let mut attempt = 0;
-
             loop {
                 let new_state = job_func(state.clone()).await;
 
@@ -107,8 +105,6 @@ impl JobMetadata {
                     }
                 }
             }
-        }
-        Err(JobError::GenericError("Job is not due to run".to_string()))
     }
 }
 

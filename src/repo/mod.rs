@@ -27,9 +27,9 @@ pub(crate) trait Repo {
                         ) -> Result<(), RepoError>;
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata,RepoError>;
 
-    async fn save_state(&self, id: String, state: Vec<u8>) -> Result<(), RepoError>;
+    // async fn get_job_state(&self, name: &JobName) -> Result<Vec<u8>,RepoError>;
 
-    async fn commit(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError>;
+    async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError>;
 
-    async fn fetch_state(&self, id: String) -> Result<String, RepoError>;
+    //async fn fetch_state(&self, id: String) -> Result<String, RepoError>;
 }
