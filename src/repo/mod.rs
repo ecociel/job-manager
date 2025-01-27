@@ -1,3 +1,5 @@
+use std::error::Error;
+use std::format;
 use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
@@ -22,4 +24,6 @@ pub(crate) trait Repo {
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata,RepoError>;
     async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError>;
 
+    async fn acquire_lock(&self, job_name: &str) -> Result<bool,RepoError>;
+    async fn release_lock(&self, job_name: &str) -> Result<(), RepoError>;
 }

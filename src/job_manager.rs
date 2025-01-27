@@ -104,7 +104,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                         repo.save_and_commit_state(&job_metadata.name, new_state.clone())
                             .await
                             .map_err(|e| JobError::JobExecutionFailed(format!("Failed to save state: {}", e)))?;
-                        eprintln!("Job '{:?}' completed successfully", job_metadata.name);
+                        eprintln!("Job '{:?}' Registered successfully", job_metadata.name);
                         Ok(())
                     }
                     Err(e) => {

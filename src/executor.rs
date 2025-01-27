@@ -62,24 +62,35 @@ where
 
             for job in jobs.iter() {
                 if job.due(now) {
-                    let mut job_clone = job.clone();
-                    let state_clone = job.state.clone();
-                    tokio::spawn(async move {
-                        let state_lock = state_clone.lock().await;
-                        let mut state = state_lock.clone();
+                    let lock_acquired = self.repository
+                        .acquire_lock(&job.name.0)
+                        .await
+                        .map_err(|e| JobError::JobExecutionFailed(format!("Failed to acquire lock: {}", e)))?;
+                    if lock_acquired {
+                        let repository_clone = self.repository.clone();
+                        let mut job_clone = job.clone();
+                        let state_clone = job.state.clone();
+                        let job_func_clone = job_func.clone();
+                        tokio::spawn(async move {
+                            let state_lock = state_clone.lock().await;
+                            let mut state = state_lock.clone();
 
-                        let schedule = job_clone.schedule.clone();
-                        let mut last_run = job_clone.last_run;
-                        let result = job_clone
-                            .run(&mut state, &mut last_run, &schedule, job_func.clone())
-                            .await;
+                            let schedule = job_clone.schedule.clone();
+                            let mut last_run = job_clone.last_run;
+                            let result = job_clone
+                                .run(&mut state, &mut last_run, &schedule, job_func_clone.clone())
+                                .await;
+                            if result.is_err() {
+                                eprintln!("Error executing job {:?}: {}", job_clone.name, result.unwrap_err());
+                            } else {
+                                eprintln!("Job {:?} completed successfully", job_clone.name);
+                            }
 
-                        if let Err(err) = result {
-                            eprintln!("Error executing job {:?}: {}", job_clone.name, err);
-                        } else {
-                            eprintln!("Job {:?} completed successfully", job_clone.name);
-                        }
-                    });
+                           if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
+                               eprintln!("Failed to release lock for job {:?}: {}", &job_clone.name.0, err);
+                           }
+                        });
+                    }
                 }
             }
             sleep(std::time::Duration::from_secs(1)).await;
