@@ -22,6 +22,36 @@ pub struct JobMetadata {
     pub max_retries: u32,
     pub backoff_duration: Duration,
 }
+#[derive(Debug, Clone, PartialEq)]
+pub enum JobState {
+    Initializing,
+    Running,
+    Retrying,
+    Failed,
+    Completed,
+}
+
+impl JobState {
+    pub fn as_bytes(&self) -> Vec<u8> {
+        match self {
+            JobState::Initializing => b"initializing".to_vec(),
+            JobState::Running => b"running".to_vec(),
+            JobState::Retrying => b"retrying".to_vec(),
+            JobState::Failed => b"failed".to_vec(),
+            JobState::Completed => b"completed".to_vec(),
+        }
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        match bytes {
+            b"running" => JobState::Running,
+            b"retrying" => JobState::Retrying,
+            b"failed" => JobState::Failed,
+            b"completed" => JobState::Completed,
+            _ => JobState::Initializing,
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct JobCfg {
