@@ -3,7 +3,6 @@ use crate::JobName;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
 use std::future::Future;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,7 +72,7 @@ impl JobMetadata {
         &mut self,
         state: &mut Vec<u8>,
         last_run: &mut DateTime<Utc>,
-        schedule: &Schedule,
+        _schedule: &Schedule, // TODO Not being used here Fix it!!
         job_func: F,
     ) -> Result<(), JobError>
     where
@@ -91,7 +90,7 @@ impl JobMetadata {
                         *last_run = now;
                         return Ok(());
                     }
-                    Err(e) if attempt < self.max_retries => {
+                    Err(_e) if attempt < self.max_retries => { //TODO Fix the error!!
                         attempt += 1;
                         eprintln!("Job failed, retrying {}/{}", attempt, self.max_retries);
                         sleep(self.backoff_duration).await;
@@ -105,39 +104,39 @@ impl JobMetadata {
     }
 }
 
-pub(crate) fn new<F, Fut>(
-    job_cfg: JobCfg,
-    job_func: F,
-) -> impl FnOnce() -> Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>
-where
-    F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
-{
-    let mut state = Vec::default();
-    let mut last_run = Utc::now();
-    let mut schedule = job_cfg.schedule.clone();
-    let mut job_metadata = JobMetadata {
-        name: job_cfg.name,
-        check_interval: job_cfg.check_interval,
-        lock_ttl: job_cfg.lock_ttl,
-        schedule: job_cfg.schedule.clone(),
-        state: Arc::new(Mutex::new(state.clone())),
-        last_run,
-        retry_attempts: 0,
-        max_retries: 3,
-        backoff_duration: Duration::from_secs(2),
-    };
-    move || {
-        let job_task = async move {
-            JobMetadata::run(
-                &mut job_metadata,
-                &mut state,
-                &mut last_run,
-                &mut schedule,
-                job_func,
-            )
-            .await
-        };
-        Box::pin(job_task)
-    }
-}
+// pub(crate) fn new<F, Fut>(
+//     job_cfg: JobCfg,
+//     job_func: F,
+// ) -> impl FnOnce() -> Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>
+// where
+//     F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+//     Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
+// {
+//     let mut state = Vec::default();
+//     let mut last_run = Utc::now();
+//     let mut schedule = job_cfg.schedule.clone();
+//     let mut job_metadata = JobMetadata {
+//         name: job_cfg.name,
+//         check_interval: job_cfg.check_interval,
+//         lock_ttl: job_cfg.lock_ttl,
+//         schedule: job_cfg.schedule.clone(),
+//         state: Arc::new(Mutex::new(state.clone())),
+//         last_run,
+//         retry_attempts: 0,
+//         max_retries: 3,
+//         backoff_duration: Duration::from_secs(2),
+//     };
+//     move || {
+//         let job_task = async move {
+//             JobMetadata::run(
+//                 &mut job_metadata,
+//                 &mut state,
+//                 &mut last_run,
+//                 &mut schedule,
+//                 job_func,
+//             )
+//             .await
+//         };
+//         Box::pin(job_task)
+//     }
+// }

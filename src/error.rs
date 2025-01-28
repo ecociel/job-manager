@@ -2,7 +2,6 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Debug;
 use crate::cassandra::RepoError;
-use thiserror::Error;
 
 pub enum JobError {
     InvalidConfig(String),

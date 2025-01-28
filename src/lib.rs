@@ -1,6 +1,6 @@
 pub mod error;
 pub mod executor;
-pub mod job_manager;
+pub mod manager;
 pub mod jobs;
 pub mod repo;
 pub mod scheduler;

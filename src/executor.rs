@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 use crate::scheduler::Scheduler;
-use crate::{JobMetadata};
+use crate::JobMetadata;
 use chrono::Utc;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -14,8 +14,8 @@ pub struct JobExecutor<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    id: String,
-    scheduler: Arc<Mutex<Scheduler>>,
+    id: String,  // TODO NOT USED
+    scheduler: Arc<Mutex<Scheduler>>, // TODO NOT USED
     jobs: Arc<Mutex<Vec<JobMetadata>>>,
     repository: Arc<R>,
 }

@@ -15,7 +15,7 @@ pub struct Manager<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    job_instance: String,
+    job_instance: String, // TODO: NEVER USED
     repo: Arc<R>,
     pub scheduler: Arc<Mutex<Scheduler>>,
     pub job_executor:  Arc<JobExecutor<R>>,
@@ -50,7 +50,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         job_cfg.validate()?;
         let repo = self.repo.clone();
         let scheduler = self.scheduler.clone();
-        let mut scheduler = scheduler.lock().await;
+        let scheduler = scheduler.lock().await;
         let job_executor = self.job_executor.clone();
 
         let initial_state = if let Ok(job_metadata) = repo.get_job_info(&job_name).await {
@@ -139,7 +139,11 @@ pub async fn run<F>(&self,job_func: F) -> Result<(), JobError>
         F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send +Copy + Sync + Clone + 'static,
     {
         println!("Starting all scheduled jobs...");
-        self.job_executor.start(job_func).await;
+        let result =self.job_executor.start(job_func).await;
+        if let Err(e) = result {
+            eprintln!("Failed to start job executor: {:?}", e);
+            return Err(e);
+        }
         Ok(())
     }
 }

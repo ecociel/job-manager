@@ -3,7 +3,7 @@ use std::pin::Pin;
 use cron::Schedule;
 use job::cassandra::TheRepository;
 use job::error::JobError;
-use job::{job_manager, JobCfg, JobName};
+use job::{manager, JobCfg, JobName};
 use std::str::FromStr;
 use std::time::Duration;
 use reqwest::ClientBuilder;
@@ -19,7 +19,7 @@ fn main() {
             .await
             .unwrap();
 
-        let mut manager = job_manager::Manager::new("job-instance-1".to_string(), repo.clone());
+        let mut manager = manager::Manager::new("job-instance-1".to_string(), repo.clone());
 
         let job_cfg = JobCfg {
             name: JobName("job".to_string()),
@@ -73,6 +73,6 @@ fn main() {
         let scheduler_lock = scheduler.lock().await;
         scheduler_lock.start().await.unwrap();
 
-        manager.run(job_func).await;
+        manager.run(job_func).await.expect("TODO: panic message");
     });
 }

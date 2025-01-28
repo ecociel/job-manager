@@ -1,5 +1,3 @@
-use std::error::Error;
-use std::format;
 use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
@@ -12,7 +10,7 @@ use crate::cassandra::RepoError;
 pub mod cassandra;
 
 #[async_trait]
-pub(crate) trait Repo {
+pub trait Repo {
     async fn create_job(&self, name: &JobName, backoff_duration: Duration, check_interval: Duration,
                         last_run: DateTime<Utc>,
                         lock_ttl: Duration,
@@ -23,7 +21,6 @@ pub(crate) trait Repo {
                         ) -> Result<(), RepoError>;
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata,RepoError>;
     async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError>;
-
     async fn acquire_lock(&self, job_name: &str) -> Result<bool,RepoError>;
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError>;
 }

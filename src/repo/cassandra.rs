@@ -2,7 +2,7 @@ use crate::repo::cassandra::ErrorKind::{
     BindError, ColumnError, ConnectError, CreateKeySpaceError, CreateTableError, DBAuthError,
     ExecuteError, InvalidTimeStamp,
 };
-use cassandra_cpp::{AsRustType, BindRustType, Cluster, LendingIterator, Session};
+use cassandra_cpp::{AsRustType, BindRustType, Cluster, Session};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::str::FromStr;
@@ -11,14 +11,10 @@ use std::time::{Duration};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
-use crate::{JobCfg, JobMetadata, JobName};
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+use crate::{JobMetadata, JobName};
 use tokio::sync::Mutex;
 use crate::cassandra::ErrorKind::RowAlreadyExists;
 use crate::repo::Repo;
-use hostname;
-use uuid::Uuid;
 use gethostname::gethostname;
 
 #[derive(Clone, Debug)]
@@ -219,7 +215,7 @@ impl Repo for TheRepository {
 
             let last_run = match last_run_str {
                 Some(ts) => DateTime::parse_from_rfc3339(&ts)
-                    .map_err(|e| RepoError {
+                    .map_err(|_e| RepoError {                        //TODO FIX ERROR
                         target: "last_run".to_string(),
                         kind: ErrorKind::InvalidConfig("Last run parse error".to_string()),
                     })?
@@ -319,7 +315,7 @@ impl Repo for TheRepository {
                 Err(_) => None,
             };
 
-            if let Some(holder) = lock_holder {
+            if let Some(_holder) = lock_holder {            //TODO - Check this logic again
                 return Ok(false);
             } else {
                 let update_query = "UPDATE job.locks SET lock_holder = ?, lock_timestamp = toTimestamp(now()) WHERE job_name = ? IF lock_holder = NULL ";
