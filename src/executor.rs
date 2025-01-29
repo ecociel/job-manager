@@ -33,26 +33,28 @@ where
             repository,
         }
     }
-    pub async fn add_job(&self, job_metadata: JobMetadata) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn create_job(&self, job_metadata: JobMetadata) -> Result<(), JobError> {
         let mut jobs = self.jobs.lock().await;
         jobs.push(job_metadata.clone());
-        self.repository.create_job(
-            &job_metadata.name,
-            job_metadata.backoff_duration,
-            job_metadata.check_interval,
-            job_metadata.last_run,
-            job_metadata.lock_ttl,
-            job_metadata.max_retries,
-            job_metadata.retry_attempts,
-            job_metadata.schedule.clone(),
-            job_metadata.state.clone(),
-            job_metadata.status.clone(),
-        )
+        self.repository
+            .create_job(
+                &job_metadata.name,
+                job_metadata.backoff_duration,
+                job_metadata.check_interval,
+                job_metadata.last_run,
+                job_metadata.lock_ttl,
+                job_metadata.max_retries,
+                job_metadata.retry_attempts,
+                job_metadata.schedule.clone(),
+                job_metadata.state.clone(),
+                job_metadata.status.clone(),
+            )
             .await
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+            .map_err(|e| JobError::DatabaseError(format!("Failed to create job: {}", e)))?;
 
         Ok(())
     }
+
 
     pub async fn start<F>(&self, job_func: F) -> Result<(), JobError>
     where
@@ -84,16 +86,34 @@ where
                             let result = job_clone
                                 .run(&mut state, &mut last_run, &schedule, job_func_clone.clone())
                                 .await;
-                            if result.is_err() {
-                                eprintln!("Error executing job {:?}: {}", job_clone.name, result.unwrap_err());
-                            } else {
-                                repository_clone.save_and_commit_state(&job_clone.name, JobStatus::Completed).await.expect("TODO: panic message");
-                                eprintln!("Job {:?} completed successfully", job_clone.name);
+                            match result {
+                                Ok(_) => {
+                                    if let Err(e) = repository_clone
+                                        .save_and_commit_state(&job_clone.name, JobStatus::Completed)
+                                        .await
+                                    {
+                                        return Err(JobError::JobExecutionFailed(format!(
+                                            "Failed to update job state to Completed: {}",
+                                            e
+                                        )));
+                                    }
+                                }
+                                Err(e) => {
+                                    return Err(JobError::JobExecutionFailed(format!(
+                                        "Error executing job {:?}: {}",
+                                        job_clone.name, e
+                                    )));
+                                }
                             }
-                            eprintln!("Releasing job {:?}", job_clone.name);
-                           if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
-                               eprintln!("Failed to release lock for job {:?}: {}", &job_clone.name.0, err);
-                           }
+
+                            if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
+                                return Err(JobError::JobExecutionFailed(format!(
+                                    "Failed to release lock for job {:?}: {}",
+                                    &job_clone.name.0, err
+                                )));
+                            }
+
+                            Ok(())
                         });
                     }
                 }

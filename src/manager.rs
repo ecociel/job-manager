@@ -115,7 +115,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         };
 
         job_executor
-            .add_job(job_metadata.clone())
+            .create_job(job_metadata.clone())
             .await
             .map_err(|e| {
                 JobError::SchedulerError(format!("Failed to add job to executor: {:?}", e))
@@ -139,11 +139,12 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                     let status = JobStatus::Retrying;
                     repo.save_and_commit_state(&job_metadata.name, status.clone()).await?;
 
-                    let err = result.as_ref().err().unwrap();
-                    warn!(
-                        "Job '{:?}' attempt {} failed: {}. Retrying after {:?}...",
-                        job_metadata.name, attempts, err, job_metadata.backoff_duration
-                    );
+                    if let Some(err) = result.as_ref().err() {
+                        warn!(
+                            "Job '{:?}' attempt {} failed: {}. Retrying after {:?}...",
+                            job_metadata.name, attempts, err, job_metadata.backoff_duration
+                        );
+                    }
                     tokio::time::sleep(job_metadata.backoff_duration).await;
                     result = job_func(state.clone()).await;
                 }

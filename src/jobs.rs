@@ -147,53 +147,20 @@ impl JobMetadata {
                         *last_run = now;
                         return Ok(());
                     }
-                    Err(_e) if attempt < self.max_retries => { //TODO Fix the error!!
+                    Err(e) if attempt < self.max_retries => {
                         attempt += 1;
-                        eprintln!("Job failed, retrying {}/{}", attempt, self.max_retries);
-                        sleep(self.backoff_duration).await;
+                        return Err(JobError::JobExecutionFailed(format!(
+                            "Job failed, retrying {}/{}: {}",
+                            attempt, self.max_retries, e
+                        )));
                     }
                     Err(e) => {
-                        eprintln!("Job failed after {} attempts", self.max_retries);
-                        return Err(JobError::JobExecutionFailed(e.to_string()));
+                        return Err(JobError::JobExecutionFailed(format!(
+                            "Job failed after {} attempts: {}",
+                            self.max_retries, e
+                        )));
                     }
                 }
             }
     }
 }
-
-// pub(crate) fn new<F, Fut>(
-//     job_cfg: JobCfg,
-//     job_func: F,
-// ) -> impl FnOnce() -> Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>
-// where
-//     F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-//     Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
-// {
-//     let mut state = Vec::default();
-//     let mut last_run = Utc::now();
-//     let mut schedule = job_cfg.schedule.clone();
-//     let mut job_metadata = JobMetadata {
-//         name: job_cfg.name,
-//         check_interval: job_cfg.check_interval,
-//         lock_ttl: job_cfg.lock_ttl,
-//         schedule: job_cfg.schedule.clone(),
-//         state: Arc::new(Mutex::new(state.clone())),
-//         last_run,
-//         retry_attempts: 0,
-//         max_retries: 3,
-//         backoff_duration: Duration::from_secs(2),
-//     };
-//     move || {
-//         let job_task = async move {
-//             JobMetadata::run(
-//                 &mut job_metadata,
-//                 &mut state,
-//                 &mut last_run,
-//                 &mut schedule,
-//                 job_func,
-//             )
-//             .await
-//         };
-//         Box::pin(job_task)
-//     }
-// }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use std::future::Future;
 use std::pin::Pin;
 use tokio::sync::Mutex;
+use crate::error::JobError;
 
 pub struct Scheduler {
     jobs:
@@ -15,7 +16,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn add<F>(&self, job: F) -> Result<()>
+    pub async fn add<F>(&self, job: F) -> Result<(),JobError>
     where
         F: Fn() -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync + 'static,
     {

@@ -12,6 +12,10 @@ pub enum JobError {
     JobExecutionFailed(String),
     RepoError(String),
     GenericError(String),
+    DatabaseError(String),
+}
+
+impl JobError {
 }
 
 impl fmt::Display for JobError {
@@ -27,6 +31,7 @@ impl fmt::Display for JobError {
             JobError::JobExecutionFailed(msg) => write!(f, "Job execution failed: {}", msg),
             JobError::RepoError(msg) => write!(f, "Repository error: {}", msg),
             JobError::GenericError(msg) => write!(f, "Generic error: {}", msg),
+            JobError::DatabaseError(msg) => write!(f, "Generic error: {}", msg),
         }
     }
 }
