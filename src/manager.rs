@@ -41,7 +41,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
 
     pub async fn register<F, Fut>(
         &mut self,
-        job_name: JobName,
         job_cfg: JobCfg,
         job_func: F,
     ) -> Result<(), JobError>
@@ -54,7 +53,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         let scheduler = self.scheduler.clone();
         let mut scheduler = scheduler.lock().await;
         let job_executor = self.job_executor.clone();
-        let initial_state = if let Ok(job_metadata) = repo.get_job_info(&job_name).await {
+        let initial_state = if let Ok(job_metadata) = repo.get_job_info(&job_cfg.name).await {
             info!("Fetched job metadata: {:?}", job_metadata.state);
             JobState::from_bytes(&job_metadata.state.lock().await)
         } else {
@@ -62,7 +61,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             JobState::Initializing
         };
         let job_metadata = JobMetadata {
-            name: job_name.clone(),
+            name: job_cfg.name.clone(),
             check_interval: job_cfg.check_interval,
             lock_ttl: job_cfg.lock_ttl,
             schedule: job_cfg.schedule.clone(),
