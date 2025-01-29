@@ -14,15 +14,15 @@ use derive_more::Display;
 pub struct JobMetadata {
     //TODO: As we proceed and more clear about implmentation we keep adding
     pub name: JobName,
+    pub state: Arc<Mutex<Vec<u8>>>,
+    pub last_run: DateTime<Utc>,
+    pub status: JobStatus,
     pub check_interval: Duration,
     pub lock_ttl: Duration,
     pub schedule: Schedule,
-    pub state: Arc<Mutex<Vec<u8>>>, //Todo Clarify with Jan
-    pub last_run: DateTime<Utc>,
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
-    pub status: JobStatus,
 }
 #[derive(Debug, Clone, PartialEq,Display)]
 pub enum JobStatus {
@@ -66,6 +66,9 @@ pub struct JobCfg {
     pub check_interval: Duration,
     pub lock_ttl: Duration,
     pub schedule: Schedule,
+    pub retry_attempts: u32,
+    pub max_retries: u32,
+    pub backoff_duration: Duration,
 }
 
 impl JobCfg {
@@ -83,6 +86,23 @@ impl JobCfg {
         if self.lock_ttl < self.check_interval {
             return Err(JobError::InvalidConfig(
                 "Lock TTL must be greater than or equal to the check interval".to_string(),
+            ));
+        }
+        if self.retry_attempts > self.max_retries {
+            return Err(JobError::InvalidConfig(
+                "Retry attempts cannot exceed max retries.".to_string(),
+            ));
+        }
+
+        if self.max_retries == 0 {
+            return Err(JobError::InvalidConfig(
+                "Max retries must be at least 1.".to_string(),
+            ));
+        }
+
+        if self.backoff_duration < Duration::from_millis(100) {
+            return Err(JobError::InvalidConfig(
+                "Backoff duration must be at least 100 milliseconds.".to_string(),
             ));
         }
 

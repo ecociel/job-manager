@@ -27,6 +27,9 @@ fn main() {
             check_interval: Duration::from_secs(5),
             lock_ttl: Duration::from_secs(60),
             schedule: Schedule::from_str("* * * * * *").unwrap(),
+            retry_attempts: 1,
+            max_retries: 3,
+            backoff_duration: Duration::from_secs(2)
         };
 
         let job1_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {

@@ -108,9 +108,9 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             schedule: job_cfg.schedule.clone(),
             state: Arc::new(Mutex::new(vec![0])),
             last_run: Utc::now(),
-            retry_attempts: 0,
-            max_retries: 3,
-            backoff_duration: Duration::from_secs(2),
+            retry_attempts: job_cfg.retry_attempts,
+            max_retries: job_cfg.max_retries,
+            backoff_duration: job_cfg.backoff_duration,
             status: JobStatus::Initializing,
         };
 
