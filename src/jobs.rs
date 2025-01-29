@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use derive_more::Display;
 
 #[derive(Clone, Debug)]
 pub struct JobMetadata {
@@ -21,34 +22,40 @@ pub struct JobMetadata {
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
+    pub status: JobStatus,
 }
-#[derive(Debug, Clone, PartialEq)]
-pub enum JobState {
+#[derive(Debug, Clone, PartialEq,Display)]
+pub enum JobStatus {
+    #[display(fmt = "initializing")]
     Initializing,
+    #[display(fmt = "running")]
     Running,
+    #[display(fmt = "retrying")]
     Retrying,
+    #[display(fmt = "failed")]
     Failed,
+    #[display(fmt = "completed")]
     Completed,
 }
 
-impl JobState {
-    pub fn as_bytes(&self) -> Vec<u8> {
+impl JobStatus {
+    pub fn as_string(&self) -> String {
         match self {
-            JobState::Initializing => b"initializing".to_vec(),
-            JobState::Running => b"running".to_vec(),
-            JobState::Retrying => b"retrying".to_vec(),
-            JobState::Failed => b"failed".to_vec(),
-            JobState::Completed => b"completed".to_vec(),
+            JobStatus::Initializing => "initializing".to_string(),
+            JobStatus::Running => "running".to_string(),
+            JobStatus::Retrying => "retrying".to_string(),
+            JobStatus::Failed => "failed".to_string(),
+            JobStatus::Completed => "completed".to_string(),
         }
     }
 
-    pub fn from_bytes(bytes: &[u8]) -> Self {
-        match bytes {
-            b"running" => JobState::Running,
-            b"retrying" => JobState::Retrying,
-            b"failed" => JobState::Failed,
-            b"completed" => JobState::Completed,
-            _ => JobState::Initializing,
+    pub fn from_string(status: &str) -> Self {
+        match status {
+            "running" => JobStatus::Running,
+            "retrying" => JobStatus::Retrying,
+            "failed" => JobStatus::Failed,
+            "completed" => JobStatus::Completed,
+            _ => JobStatus::Initializing,
         }
     }
 }

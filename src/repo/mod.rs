@@ -6,6 +6,7 @@ use cron::Schedule;
 use tokio::sync::Mutex;
 use crate::{JobMetadata, JobName};
 use crate::cassandra::RepoError;
+use crate::jobs::JobStatus;
 
 pub mod cassandra;
 
@@ -18,9 +19,10 @@ pub trait Repo {
                         retry_attempts: u32,
                         schedule: Schedule,
                         state: Arc<Mutex<Vec<u8>>>,
+                        status: JobStatus,
                         ) -> Result<(), RepoError>;
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata,RepoError>;
-    async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError>;
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError>;
     async fn acquire_lock(&self, job_name: &str) -> Result<bool,RepoError>;
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError>;
 }

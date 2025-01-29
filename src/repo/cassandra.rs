@@ -16,6 +16,7 @@ use tokio::sync::Mutex;
 use crate::cassandra::ErrorKind::RowAlreadyExists;
 use crate::repo::Repo;
 use gethostname::gethostname;
+use crate::jobs::JobStatus;
 
 #[derive(Clone, Debug)]
 pub struct TheRepository {
@@ -73,62 +74,73 @@ impl Repo for TheRepository {
         max_retries: u32,
         schedule: Schedule,
         state: Arc<Mutex<Vec<u8>>>,
+        status: JobStatus,
     ) -> Result<(), RepoError> {
         let mut statement = self
             .session
-            .statement("INSERT INTO job.jobs (name, backoff_duration, check_interval, last_run, lock_ttl,max_retries, retry_attempts,schedule, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);");
+            .statement("INSERT INTO job.jobs (name, backoff_duration, check_interval, last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);");
 
         statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
             target: name.0.clone(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(1, backoff_duration.as_secs() as i64).map_err(|e| RepoError {
+
+        let backoff_secs = backoff_duration.as_secs() as i64;
+        statement.bind(1, backoff_secs).map_err(|e| RepoError {
             target: "backoff_duration".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(2, check_interval.as_secs() as i32).map_err(|e| RepoError {
+
+        let check_interval_secs = check_interval.as_secs() as i64;
+        statement.bind(2, check_interval_secs).map_err(|e| RepoError {
             target: "check_interval".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
+
         let last_run_epoch = last_run.naive_utc().and_utc().timestamp();
-        statement
-            .bind(3, last_run_epoch)
-            .map_err(|e| RepoError {
-                target: "last_run".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            })?;
-        statement.bind(4, lock_ttl.as_secs() as i32).map_err(|e| RepoError {
+        statement.bind(3, last_run_epoch).map_err(|e| RepoError {
+            target: "last_run".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
+        let lock_ttl_secs = lock_ttl.as_secs() as i32;
+        statement.bind(4, lock_ttl_secs).map_err(|e| RepoError {
             target: "lock_ttl".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement
-            .bind(5, max_retries as i32)
-            .map_err(|e| RepoError {
-                target: "max_retries".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            })?;
+
+        statement.bind(5, max_retries as i32).map_err(|e| RepoError {
+            target: "max_retries".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
         statement.bind(6, retry_attempts as i32).map_err(|e| RepoError {
             target: "retry_attempts".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
-        statement.bind(7,schedule.to_string().as_str()).map_err(|e| RepoError {
+        statement.bind(7, schedule.to_string().as_str()).map_err(|e| RepoError {
             target: "schedule".to_string(),
             kind: ErrorKind::BindError(e.into()),
         })?;
+
         let state_bytes = state.lock().await.clone();
-        statement
-            .bind(8, state_bytes)
-            .map_err(|e| RepoError {
-                target: "state".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            })?;
-        let result =statement.execute().await.map_err(|e| RepoError {
+        statement.bind(8, state_bytes).map_err(|e| RepoError {
+            target: "state".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
+        statement.bind(9, status.to_string().as_str()).map_err(|e| RepoError {
+            target: "status".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
+        let result = statement.execute().await.map_err(|e| RepoError {
             target: "job.jobs".to_string(),
             kind: ErrorKind::ExecuteError(e.into()),
         })?;
 
         if let Some(row) = result.first_row() {
-            let app: bool = row.get_by_name("[applied]").map_err(|e| RepoError{
+            let app: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
                 target: "jobs - [applied] status".to_string(),
                 kind: ExecuteError(e.into()),
             })?;
@@ -136,7 +148,7 @@ impl Repo for TheRepository {
             if !app {
                 return Err(RepoError {
                     target: name.0.clone(),
-                    kind: RowAlreadyExists
+                    kind: RowAlreadyExists,
                 });
             }
         }
@@ -145,8 +157,9 @@ impl Repo for TheRepository {
     }
 
 
+
     async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
-        let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state FROM jobs WHERE name = ?;";
+        let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status FROM jobs WHERE name = ?;";
         let mut statement = self.session.statement(query);
 
         statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
@@ -223,6 +236,13 @@ impl Repo for TheRepository {
                 None => Utc::now(),
             };
 
+            let status: String = row
+                .get_by_name("status")
+                .map_err(|_| RepoError {
+                    target: "status".to_string(),
+                    kind: ErrorKind::InvalidConfig("Missing or invalid status".to_string()),
+                })?;
+            let job_status = JobStatus::from_string(&status);
             let backoff_duration = Duration::from_secs(backoff_duration_secs as u64);
             Ok(JobMetadata {
                 name: name.clone(),
@@ -234,6 +254,7 @@ impl Repo for TheRepository {
                 retry_attempts: retry_attempts as u32,
                 schedule,
                 state,
+                status: job_status
             })
         } else {
             Err(RepoError {
@@ -244,7 +265,7 @@ impl Repo for TheRepository {
     }
 
 
-    async fn save_and_commit_state(&self, name: &JobName, state: Vec<u8>) -> Result<(), RepoError> {
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
             "SELECT name FROM job.jobs WHERE name = ?;",
         );
@@ -265,11 +286,12 @@ impl Repo for TheRepository {
         if result.first_row().is_some() {
             eprintln!("Job found. Updating state for job: {:?}", name);
             let mut update_statement = self.session.statement(
-                "UPDATE job.jobs SET state = ? WHERE name = ?;",
+                "UPDATE job.jobs SET status = ? WHERE name = ?;",
             );
-            update_statement.bind(0, state).map_err(|e| {
+            let status_str = status.to_string();
+            update_statement.bind(0, status_str.as_str()).map_err(|e| {
                 RepoError {
-                    target: "state".to_string(),
+                    target: "status".to_string(),
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use crate::error::JobError;
+use crate::jobs::JobStatus;
 use crate::repo::Repo;
 
 
@@ -45,6 +46,7 @@ where
             job_metadata.retry_attempts,
             job_metadata.schedule.clone(),
             job_metadata.state.clone(),
+            job_metadata.status.clone(),
         )
             .await
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
@@ -77,15 +79,18 @@ where
 
                             let schedule = job_clone.schedule.clone();
                             let mut last_run = job_clone.last_run;
+
+                            repository_clone.save_and_commit_state(&job_clone.name, JobStatus::Running).await.expect("TODO: panic message");
                             let result = job_clone
                                 .run(&mut state, &mut last_run, &schedule, job_func_clone.clone())
                                 .await;
                             if result.is_err() {
                                 eprintln!("Error executing job {:?}: {}", job_clone.name, result.unwrap_err());
                             } else {
+                                repository_clone.save_and_commit_state(&job_clone.name, JobStatus::Completed).await.expect("TODO: panic message");
                                 eprintln!("Job {:?} completed successfully", job_clone.name);
                             }
-
+                            eprintln!("Releasing job {:?}", job_clone.name);
                            if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
                                eprintln!("Failed to release lock for job {:?}: {}", &job_clone.name.0, err);
                            }
