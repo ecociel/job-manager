@@ -4,6 +4,7 @@ use crate::scheduler::Scheduler;
 use crate::JobMetadata;
 use chrono::Utc;
 use std::sync::Arc;
+use tokio::signal;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use crate::error::JobError;
@@ -56,10 +57,19 @@ where
     }
 
 
+
     pub async fn start<F>(&self, job_func: F) -> Result<(), JobError>
     where
-        F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send +Copy + Sync + Clone + 'static,
+        F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> + Send + Copy + Sync + Clone + 'static,
     {
+        let repository = self.repository.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = Self::wait_for_shutdown(repository.clone()).await {
+                eprintln!("Shutdown error: {}", e);
+            }
+        });
+
         loop {
             let now = Utc::now();
             let jobs = self.jobs.lock().await.clone();
@@ -70,55 +80,56 @@ where
                         .acquire_lock(&job.name.0)
                         .await
                         .map_err(|e| JobError::JobExecutionFailed(format!("Failed to acquire lock: {}", e)))?;
+
                     if lock_acquired {
                         let repository_clone = self.repository.clone();
                         let mut job_clone = job.clone();
                         let state_clone = job.state.clone();
                         let job_func_clone = job_func.clone();
+
                         tokio::spawn(async move {
-                            let state_lock = state_clone.lock().await;
-                            let mut state = state_lock.clone();
+                            let result = async {
+                                let mut state = state_clone.lock().await.clone();
+                                let schedule = job_clone.schedule.clone();
+                                let mut last_run = job_clone.last_run;
 
-                            let schedule = job_clone.schedule.clone();
-                            let mut last_run = job_clone.last_run;
+                                repository_clone
+                                    .save_and_commit_state(&job_clone.name, JobStatus::Running)
+                                    .await
+                                    .map_err(|e| JobError::JobExecutionFailed(format!("Failed to update job to Running: {}", e)))?;
 
-                            repository_clone.save_and_commit_state(&job_clone.name, JobStatus::Running).await.expect("TODO: panic message");
-                            let result = job_clone
-                                .run(&mut state, &mut last_run, &schedule, job_func_clone.clone())
-                                .await;
-                            match result {
-                                Ok(_) => {
-                                    if let Err(e) = repository_clone
-                                        .save_and_commit_state(&job_clone.name, JobStatus::Completed)
-                                        .await
-                                    {
-                                        return Err(JobError::JobExecutionFailed(format!(
-                                            "Failed to update job state to Completed: {}",
-                                            e
-                                        )));
-                                    }
-                                }
-                                Err(e) => {
-                                    return Err(JobError::JobExecutionFailed(format!(
-                                        "Error executing job {:?}: {}",
-                                        job_clone.name, e
-                                    )));
-                                }
+                                job_clone.run(&mut state, &mut last_run, &schedule, job_func_clone.clone()).await?;
+
+                                repository_clone
+                                    .save_and_commit_state(&job_clone.name, JobStatus::Completed)
+                                    .await
+                                    .map_err(|e| JobError::JobExecutionFailed(format!("Failed to update job to Completed: {}", e)))?;
+
+                                Ok::<(), JobError>(())
+                            };
+                            if let Err(e) = result.await {
+                                eprintln!("Job execution error: {}", e);
                             }
-
                             if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
-                                return Err(JobError::JobExecutionFailed(format!(
-                                    "Failed to release lock for job {:?}: {}",
-                                    &job_clone.name.0, err
-                                )));
+                                eprintln!("Failed to release lock for job {:?}: {}", &job_clone.name.0, err);
                             }
-
-                            Ok(())
                         });
                     }
                 }
             }
+
             sleep(std::time::Duration::from_secs(1)).await;
         }
+    }
+    pub async fn wait_for_shutdown(repository: Arc<R>) -> Result<(), JobError> {
+        signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+
+        eprintln!("Shutting down... Releasing all locks.");
+        repository.release_all_locks().await.map_err(|e| {
+            JobError::JobExecutionFailed(format!("Failed to release locks during shutdown: {}", e))
+        })?;
+
+        eprintln!("All locks released. Exiting.");
+        Ok(())
     }
 }

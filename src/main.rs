@@ -78,7 +78,7 @@ fn main() {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        manager.run_registered(&job1_cfg.name.clone()).await.expect("TODO: panic message");
+        manager.run_registered_jobs(&job1_cfg.name.clone()).await.expect("TODO: panic message");
 
         // match manager.register(job2_cfg.name.clone(), job2_cfg, move |state| {
         //     let job2_func = job2_func.clone();

@@ -1,3 +1,4 @@
+use std::eprintln;
 use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
@@ -5,7 +6,7 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use tokio::sync::Mutex;
 use crate::{JobMetadata, JobName};
-use crate::cassandra::RepoError;
+use crate::cassandra::{ErrorKind, RepoError};
 use crate::jobs::JobStatus;
 
 pub mod cassandra;
@@ -25,4 +26,5 @@ pub trait Repo {
     async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError>;
     async fn acquire_lock(&self, job_name: &str) -> Result<bool,RepoError>;
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError>;
+    async fn release_all_locks(&self) -> Result<(), RepoError>;
 }

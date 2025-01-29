@@ -445,8 +445,61 @@ impl Repo for TheRepository {
         })
     }
 
+     async fn release_all_locks(&self) -> Result<(), RepoError> {
+        let query = "UPDATE job.locks SET lock_holder = null WHERE job_name IN
+                 (SELECT job_name FROM job.locks WHERE lock_holder = ?)
+                 IF lock_holder = ?";
 
-// async fn fetch_state(&self, id: String) -> Result<String, RepoError> {
+        let mut statement = self.session.statement(query);
+
+        statement.bind(0, self.hostname.as_str()).map_err(|e| {
+            RepoError {
+                target: "lock_holder".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            }
+        })?;
+
+        statement.bind(1, self.hostname.as_str()).map_err(|e| {
+            RepoError {
+                target: "lock_holder".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            }
+        })?;
+
+        let result = statement.execute().await.map_err(|e| {
+            RepoError {
+                target: "job.locks".to_string(),
+                kind: ErrorKind::ExecuteError(e.into()),
+            }
+        })?;
+
+        if let Some(row) = result.first_row() {
+            let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
+                target: "job.locks - [applied] status".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            })?;
+
+            return if applied {
+                eprintln!("All locks released successfully.");
+                Ok(())
+            } else {
+                Err(RepoError {
+                    target: "job.locks".to_string(),
+                    kind: ErrorKind::AcquireLockFailed(
+                        "Failed to release all locks: lock_holder did not match.".to_string(),
+                    ),
+                })
+            };
+        }
+
+        Err(RepoError {
+            target: "job.locks".to_string(),
+            kind: ErrorKind::AcquireLockFailed("Failed to release all locks due to unknown reasons.".to_string()),
+        })
+    }
+
+
+    // async fn fetch_state(&self, id: String) -> Result<String, RepoError> {
     //     let query = "SELECT state FROM icp_device.state WHERE id = ?;";
     //     let mut statement = self.session.statement(query);
     //

@@ -49,10 +49,10 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         let mut jobs = self.jobs.lock();
         jobs.await.push((config.clone(), job_func_arc));
 
-        eprintln!("Job '{}' registered successfully.", config.name);
+        info!("Job '{}' registered successfully.", config.name);
     }
 
-    pub async fn run_registered(&mut self, job_name: &JobName) -> Result<(), JobError> {
+    pub async fn run_registered_jobs(&mut self, job_name: &JobName) -> Result<(), JobError> {
 
         let job_entry = {
             let jobs = self.jobs.lock().await;
@@ -128,9 +128,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
 
             async move {
                 let mut state = job_metadata.state.lock().await;
-                //  let status = JobStatus::Running;
-                // repo.save_and_commit_state(&job_metadata.name, status.clone()).await?;
-
                 let mut result = job_func(state.clone()).await;
                 let mut attempts = 0;
 
@@ -148,14 +145,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                     tokio::time::sleep(job_metadata.backoff_duration).await;
                     result = job_func(state.clone()).await;
                 }
-
-                // if result.is_ok() {
-                //     let status = JobStatus::Completed;
-                // } else {
-                //     let status = JobStatus::Failed;
-                // }
-                //
-                // repo.save_and_commit_state(&job_metadata.name, status.clone()).await?;
                 result.map(|_| ()).map_err(|e| JobError::JobExecutionFailed(format!("{}", e)))
             }
         });
@@ -184,7 +173,7 @@ pub async fn start<F>(&self,job_func: F) -> Result<(), JobError>
                 Ok(())
             }
             Err(e) => {
-                Err(e)
+                Err(JobError::JobExecutionFailed(format!("Failed to start jobs: {}", e)))
             }
         }
     }
