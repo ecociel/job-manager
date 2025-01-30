@@ -85,7 +85,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
     // job never needs to be clone - no need for two owners at the same time
     // maybe such thinking helps to eliminate some of the concurrency and ownership issues
 
-    pub async fn run<F, Fut>(
+     async fn run<F, Fut>(
         &mut self,
         job_cfg: JobCfg,
         job_func: F,

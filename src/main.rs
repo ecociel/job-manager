@@ -56,46 +56,42 @@ fn main() {
                 Ok(state)
             })
         };
-        // let job2_cfg = JobCfg {
-        //     name: JobName("job2".to_string()),
-        //     check_interval: Duration::from_secs(10),
-        //     lock_ttl: Duration::from_secs(60),
-        //     schedule: Schedule::from_str("*/10 * * * * *").unwrap(),
-        // };
-        //
-        // let job2_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
-        //     Box::pin(async move {
-        //         println!("Job 2: Performing custom task...");
-        //         // tokio::time::sleep(Duration::from_secs(2)).await;
-        //         // println!("Job 2: Task completed!");
-        //         Ok(state)
-        //     })
-        // };
+        let job2_cfg = JobCfg {
+            name: JobName("job2".to_string()),
+            check_interval: Duration::from_secs(10),
+            lock_ttl: Duration::from_secs(60),
+            schedule: Schedule::from_str("*/10 * * * * *").unwrap(),
+            retry_attempts: 1,
+            max_retries: 3,
+            backoff_duration: Duration::from_secs(2)
+        };
+
+        let job2_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
+            Box::pin(async move {
+                println!("Job 2: Performing custom task...");
+                // tokio::time::sleep(Duration::from_secs(2)).await;
+                // println!("Job 2: Task completed!");
+                Ok(state)
+            })
+        };
 
         manager.register(job1_cfg.clone(), job1_func).await;
+
+        manager.register(job2_cfg.clone(),job1_func).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         manager.run_registered_jobs(&job1_cfg.name.clone()).await.expect("TODO: panic message");
 
-        // match manager.register(job2_cfg.name.clone(), job2_cfg, move |state| {
-        //     let job2_func = job2_func.clone();
-        //     async move {
-        //         job2_func(state)
-        //             .await
-        //             .map_err(|e| anyhow::Error::msg(format!("Job 2 failed: {:?}", e)))
-        //     }
-        // }).await {
-        //     Ok(_) => println!("Job 2 registered successfully"),
-        //     Err(e) => eprintln!("Error registering Job 2: {:?}", e),
-        // }
+        manager.run_registered_jobs(&job2_cfg.name.clone()).await.expect("TODO: panic message");
+
 
         let scheduler = manager.scheduler.clone();
         let scheduler_lock = scheduler.lock().await;
         scheduler_lock.start().await.unwrap();
 
         manager.start(job1_func).await.expect("Job 1 run failed");
-        // manager.run(job2_func).await.expect("Job 2 run failed");
+        manager.start(job2_func).await.expect("Job 2 run failed");
     });
 }
 
