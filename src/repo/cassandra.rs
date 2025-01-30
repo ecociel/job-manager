@@ -264,7 +264,7 @@ impl Repo for TheRepository {
     //     }
     // }
 
-
+    //TODO: Rename the query if required or choose state or status ???
     async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
             "SELECT name FROM job.jobs WHERE name = ?;",
@@ -282,7 +282,7 @@ impl Repo for TheRepository {
                 kind: ErrorKind::ExecuteError(e.into()),
             }
         })?;
-
+        //TODO: We need to update last run as well
         if result.first_row().is_some() {
             eprintln!("Job found. Updating state for job: {:?}", name);
             let mut update_statement = self.session.statement(
@@ -399,7 +399,7 @@ impl Repo for TheRepository {
         })
     }
 
-
+    //TODO : I need to fix this. Problem is when lock_status is unlocked
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError> {
         let query = "UPDATE job.locks
                 SET owner = NULL, lock_status = 'UNLOCKED'

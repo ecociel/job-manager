@@ -26,7 +26,7 @@ fn main() {
             name: JobName("job1".to_string()),
             check_interval: Duration::from_secs(5),
             lock_ttl: Duration::from_secs(60),
-            schedule: JobSchedule::minutely(),
+            schedule: JobSchedule::secondly(),
             retry_attempts: 1,
             max_retries: 3,
             backoff_duration: Duration::from_secs(2)
@@ -82,10 +82,7 @@ fn main() {
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        manager.run_registered_jobs(&job1_cfg.name.clone()).await.expect("TODO: panic message");
-
-        //manager.run_registered_jobs(&job2_cfg.name.clone()).await.expect("TODO: panic message");
-
+        manager.run(&job1_cfg.name.clone(), job1_cfg.clone(), job1_func).await.expect("TODO: panic message");
 
         // let scheduler = manager.scheduler.clone();
         // let scheduler_lock = scheduler.lock().await;

@@ -16,8 +16,8 @@ pub struct JobExecutor<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    pub(crate) id: String,  // TODO NOT USED
-    //scheduler: Arc<Mutex<Scheduler>>, // TODO NOT USED
+    pub(crate) id: String,  // TODO NOT USED - Do we need this. If yes why ?
+    //TODO And do we need a separate Table to maintain the executor ?
     pub(crate) jobs: Arc<Mutex<Vec<JobMetadata>>>,
     pub(crate) repository: Arc<R>,
 }
@@ -29,7 +29,6 @@ where
     pub fn new(repository: Arc<R>) -> Self {
         JobExecutor {
             id:"".to_string(),
-            //scheduler,
             jobs: Arc::new(Mutex::new(Vec::new())),
             repository,
         }
@@ -55,7 +54,7 @@ where
 
         Ok(())
     }
-
+    //TODO : this func is not used as of now.I need to figure out
     pub async fn execute_job_with_retries<F, Fut>(
         &self,
         job_metadata: JobMetadata,
@@ -96,12 +95,11 @@ where
     where
         F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> + Send + Copy + Sync + Clone + 'static,
     {
-        let repository = self.repository.clone();
 
         loop {
             let now = Utc::now();
             let jobs = self.jobs.lock().await.clone();
-
+            //TODO : What happens if job is not found ??
             for job in jobs.iter() {
                 if job.due(now) {
                     if let Err(err) = self.repository.release_all_locks().await {
@@ -128,7 +126,7 @@ where
                                     .save_and_commit_state(&job_clone.name, JobStatus::Running)
                                     .await
                                     .map_err(|e| JobError::JobExecutionFailed(format!("Failed to update job to Running: {}", e)))?;
-                                eprintln!("******************************{}", schedule);
+
                                 job_clone.run(&mut state, &mut last_run,&schedule , job_func_clone.clone()).await?;
 
                                 repository_clone
