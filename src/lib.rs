@@ -3,7 +3,7 @@ pub mod executor;
 pub mod manager;
 pub mod jobs;
 pub mod repo;
-pub mod scheduler;
+pub mod schedule;
 
 pub use repo::cassandra;
 

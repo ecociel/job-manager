@@ -9,6 +9,7 @@ use std::time::Duration;
 use log::info;
 use reqwest::ClientBuilder;
 use tokio::runtime::Runtime;
+use job::schedule::JobSchedule;
 
 fn main() {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
@@ -25,7 +26,7 @@ fn main() {
             name: JobName("job1".to_string()),
             check_interval: Duration::from_secs(5),
             lock_ttl: Duration::from_secs(60),
-            schedule: Schedule::from_str("* * * * * *").unwrap(),
+            schedule: JobSchedule::minutely(),
             retry_attempts: 1,
             max_retries: 3,
             backoff_duration: Duration::from_secs(2)
@@ -56,42 +57,42 @@ fn main() {
                 Ok(state)
             })
         };
-        let job2_cfg = JobCfg {
-            name: JobName("job2".to_string()),
-            check_interval: Duration::from_secs(10),
-            lock_ttl: Duration::from_secs(60),
-            schedule: Schedule::from_str("*/10 * * * * *").unwrap(),
-            retry_attempts: 1,
-            max_retries: 3,
-            backoff_duration: Duration::from_secs(2)
-        };
-
-        let job2_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
-            Box::pin(async move {
-                println!("Job 2: Performing custom task...");
-                // tokio::time::sleep(Duration::from_secs(2)).await;
-                // println!("Job 2: Task completed!");
-                Ok(state)
-            })
-        };
+        // let job2_cfg = JobCfg {
+        //     name: JobName("job2".to_string()),
+        //     check_interval: Duration::from_secs(10),
+        //     lock_ttl: Duration::from_secs(60),
+        //     schedule: JobSchedule::minutely(),
+        //     retry_attempts: 1,
+        //     max_retries: 3,
+        //     backoff_duration: Duration::from_secs(2)
+        // };
+        //
+        // let job2_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
+        //     Box::pin(async move {
+        //         println!("Job 2: Performing custom task...");
+        //         // tokio::time::sleep(Duration::from_secs(2)).await;
+        //         // println!("Job 2: Task completed!");
+        //         Ok(state)
+        //     })
+        // };
 
         manager.register(job1_cfg.clone(), job1_func).await;
 
-        manager.register(job2_cfg.clone(),job1_func).await;
+        //manager.register(job2_cfg.clone(),job1_func).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
         manager.run_registered_jobs(&job1_cfg.name.clone()).await.expect("TODO: panic message");
 
-        manager.run_registered_jobs(&job2_cfg.name.clone()).await.expect("TODO: panic message");
+        //manager.run_registered_jobs(&job2_cfg.name.clone()).await.expect("TODO: panic message");
 
 
-        let scheduler = manager.scheduler.clone();
-        let scheduler_lock = scheduler.lock().await;
-        scheduler_lock.start().await.unwrap();
+        // let scheduler = manager.scheduler.clone();
+        // let scheduler_lock = scheduler.lock().await;
+        // scheduler_lock.start().await.unwrap();
 
         manager.start(job1_func).await.expect("Job 1 run failed");
-        manager.start(job2_func).await.expect("Job 2 run failed");
+        //manager.start(job2_func).await.expect("Job 2 run failed");
     });
 }
 

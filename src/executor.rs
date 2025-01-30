@@ -1,9 +1,9 @@
 use std::future::Future;
 use std::pin::Pin;
-use crate::scheduler::Scheduler;
 use crate::JobMetadata;
 use chrono::Utc;
 use std::sync::Arc;
+use log::warn;
 use tokio::signal;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
@@ -16,20 +16,20 @@ pub struct JobExecutor<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    id: String,  // TODO NOT USED
-    scheduler: Arc<Mutex<Scheduler>>, // TODO NOT USED
-    jobs: Arc<Mutex<Vec<JobMetadata>>>,
-    repository: Arc<R>,
+    pub(crate) id: String,  // TODO NOT USED
+    //scheduler: Arc<Mutex<Scheduler>>, // TODO NOT USED
+    pub(crate) jobs: Arc<Mutex<Vec<JobMetadata>>>,
+    pub(crate) repository: Arc<R>,
 }
 
 impl<R>JobExecutor<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    pub fn new(scheduler: Arc<Mutex<Scheduler>>, repository: Arc<R>) -> Self {
+    pub fn new(repository: Arc<R>) -> Self {
         JobExecutor {
             id:"".to_string(),
-            scheduler,
+            //scheduler,
             jobs: Arc::new(Mutex::new(Vec::new())),
             repository,
         }
@@ -56,6 +56,40 @@ where
         Ok(())
     }
 
+    pub async fn execute_job_with_retries<F, Fut>(
+        &self,
+        job_metadata: JobMetadata,
+        job_func: F,
+    ) -> Result<(), JobError>
+    where
+        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Vec<u8>, JobError>> + Send + 'static,
+    {
+        let repo = self.repository.clone();
+        let mut state = job_metadata.state.lock().await;
+
+        let mut result = job_func(state.clone()).await;
+        let mut attempts = 0;
+
+        while result.is_err() && attempts < job_metadata.max_retries {
+            attempts += 1;
+            let status = JobStatus::Retrying;
+            repo.save_and_commit_state(&job_metadata.name, status.clone())
+                .await
+                .map_err(|e| JobError::JobExecutionFailed(e.to_string()))?;
+
+            if let Some(err) = result.as_ref().err() {
+                warn!(
+                    "Job '{:?}' attempt {} failed: {}. Retrying after {:?}...",
+                    job_metadata.name, attempts, err, job_metadata.backoff_duration
+                );
+            }
+            tokio::time::sleep(job_metadata.backoff_duration).await;
+            result = job_func(state.clone()).await;
+        }
+
+        result.map(|_| ()).map_err(|e| JobError::JobExecutionFailed(format!("{}", e)))
+    }
 
 
     pub async fn start<F>(&self, job_func: F) -> Result<(), JobError>
@@ -94,8 +128,8 @@ where
                                     .save_and_commit_state(&job_clone.name, JobStatus::Running)
                                     .await
                                     .map_err(|e| JobError::JobExecutionFailed(format!("Failed to update job to Running: {}", e)))?;
-
-                                job_clone.run(&mut state, &mut last_run, &schedule, job_func_clone.clone()).await?;
+                                eprintln!("******************************{}", schedule);
+                                job_clone.run(&mut state, &mut last_run,&schedule , job_func_clone.clone()).await?;
 
                                 repository_clone
                                     .save_and_commit_state(&job_clone.name, JobStatus::Completed)

@@ -17,6 +17,7 @@ use crate::cassandra::ErrorKind::RowAlreadyExists;
 use crate::repo::Repo;
 use gethostname::gethostname;
 use crate::jobs::JobStatus;
+use crate::schedule::JobSchedule;
 
 #[derive(Clone, Debug)]
 pub struct TheRepository {
@@ -72,7 +73,7 @@ impl Repo for TheRepository {
         lock_ttl: Duration,
         retry_attempts: u32,
         max_retries: u32,
-        schedule: Schedule,
+        schedule: JobSchedule,
         state: Arc<Mutex<Vec<u8>>>,
         status: JobStatus,
     ) -> Result<(), RepoError> {
@@ -157,112 +158,111 @@ impl Repo for TheRepository {
     }
 
 
-
-    async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
-        let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status FROM jobs WHERE name = ?;";
-        let mut statement = self.session.statement(query);
-
-        statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
-            target: name.0.clone(),
-            kind: ErrorKind::BindError(e.into()),
-        })?;
-
-        let result = statement.execute().await.map_err(|e| RepoError {
-            target: "job.jobs".to_string(),
-            kind: ErrorKind::ExecuteError(e.into()),
-        })?;
-
-        if let Some(row) = result.first_row() {
-            let check_interval_secs: i64 = row
-                .get_by_name("check_interval")
-                .map_err(|_| RepoError {
-                    target: "check_interval".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid check_interval".to_string()),
-                })?;
-            let lock_ttl_secs: i64 = row
-                .get_by_name("lock_ttl")
-                .map_err(|_| RepoError {
-                    target: "lock_ttl".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid lock_ttl".to_string()),
-                })?;
-            let schedule_str: String = row
-                .get_by_name("schedule")
-                .map_err(|_| RepoError {
-                    target: "schedule".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid schedule".to_string()),
-                })?;
-            let state_bytes: Vec<u8> = row
-                .get_by_name("state")
-                .map_err(|_| RepoError {
-                    target: "state".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid state".to_string()),
-                })?;
-            let last_run_str: Option<String> = row.get_by_name("last_run").ok(); // `Option<String>` to handle NULL
-            let retry_attempts: i32 = row
-                .get_by_name("retry_attempts")
-                .map_err(|_| RepoError {
-                    target: "retry_attempts".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid retry_attempts".to_string()),
-                })?;
-            let max_retries: i32 = row
-                .get_by_name("max_retries")
-                .map_err(|_| RepoError {
-                    target: "max_retries".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid max_retries".to_string()),
-                })?;
-            let backoff_duration_secs: i64 = row
-                .get_by_name("backoff_duration")
-                .map_err(|_| RepoError {
-                    target: "backoff_duration".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid backoff_duration".to_string()),
-                })?;
-
-            let check_interval = Duration::from_secs(check_interval_secs as u64);
-            let lock_ttl = Duration::from_secs(lock_ttl_secs as u64);
-            let schedule = Schedule::from_str(&schedule_str).map_err(|_| RepoError {
-                target: "schedule".to_string(),
-                kind: ErrorKind::InvalidConfig("Schedule parse error".to_string()),
-            })?;
-
-            let state = Arc::new(Mutex::new(state_bytes));
-
-            let last_run = match last_run_str {
-                Some(ts) => DateTime::parse_from_rfc3339(&ts)
-                    .map_err(|_e| RepoError {                        //TODO FIX ERROR
-                        target: "last_run".to_string(),
-                        kind: ErrorKind::InvalidConfig("Last run parse error".to_string()),
-                    })?
-                    .with_timezone(&Utc),
-                None => Utc::now(),
-            };
-
-            let status: String = row
-                .get_by_name("status")
-                .map_err(|_| RepoError {
-                    target: "status".to_string(),
-                    kind: ErrorKind::InvalidConfig("Missing or invalid status".to_string()),
-                })?;
-            let job_status = JobStatus::from_string(&status);
-            let backoff_duration = Duration::from_secs(backoff_duration_secs as u64);
-            Ok(JobMetadata {
-                name: name.clone(),
-                backoff_duration,
-                check_interval,
-                last_run,
-                lock_ttl,
-                max_retries: max_retries as u32,
-                retry_attempts: retry_attempts as u32,
-                schedule,
-                state,
-                status: job_status
-            })
-        } else {
-            Err(RepoError {
-                target: name.0.clone(),
-                kind: ErrorKind::NotFound,
-            })
-        }
-    }
+    // async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
+    //     let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status FROM jobs WHERE name = ?;";
+    //     let mut statement = self.session.statement(query);
+    //
+    //     statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
+    //         target: name.0.clone(),
+    //         kind: ErrorKind::BindError(e.into()),
+    //     })?;
+    //
+    //     let result = statement.execute().await.map_err(|e| RepoError {
+    //         target: "job.jobs".to_string(),
+    //         kind: ErrorKind::ExecuteError(e.into()),
+    //     })?;
+    //
+    //     if let Some(row) = result.first_row() {
+    //         let check_interval_secs: i64 = row
+    //             .get_by_name("check_interval")
+    //             .map_err(|_| RepoError {
+    //                 target: "check_interval".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid check_interval".to_string()),
+    //             })?;
+    //         let lock_ttl_secs: i64 = row
+    //             .get_by_name("lock_ttl")
+    //             .map_err(|_| RepoError {
+    //                 target: "lock_ttl".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid lock_ttl".to_string()),
+    //             })?;
+    //         let schedule_str: String = row
+    //             .get_by_name("schedule")
+    //             .map_err(|_| RepoError {
+    //                 target: "schedule".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid schedule".to_string()),
+    //             })?;
+    //         let state_bytes: Vec<u8> = row
+    //             .get_by_name("state")
+    //             .map_err(|_| RepoError {
+    //                 target: "state".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid state".to_string()),
+    //             })?;
+    //         let last_run_str: Option<String> = row.get_by_name("last_run").ok(); // `Option<String>` to handle NULL
+    //         let retry_attempts: i32 = row
+    //             .get_by_name("retry_attempts")
+    //             .map_err(|_| RepoError {
+    //                 target: "retry_attempts".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid retry_attempts".to_string()),
+    //             })?;
+    //         let max_retries: i32 = row
+    //             .get_by_name("max_retries")
+    //             .map_err(|_| RepoError {
+    //                 target: "max_retries".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid max_retries".to_string()),
+    //             })?;
+    //         let backoff_duration_secs: i64 = row
+    //             .get_by_name("backoff_duration")
+    //             .map_err(|_| RepoError {
+    //                 target: "backoff_duration".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid backoff_duration".to_string()),
+    //             })?;
+    //
+    //         let check_interval = Duration::from_secs(check_interval_secs as u64);
+    //         let lock_ttl = Duration::from_secs(lock_ttl_secs as u64);
+    //         let schedule = Schedule::from_str(&schedule_str).map_err(|_| RepoError {
+    //             target: "schedule".to_string(),
+    //             kind: ErrorKind::InvalidConfig("Schedule parse error".to_string()),
+    //         })?;
+    //
+    //         let state = Arc::new(Mutex::new(state_bytes));
+    //
+    //         let last_run = match last_run_str {
+    //             Some(ts) => DateTime::parse_from_rfc3339(&ts)
+    //                 .map_err(|_e| RepoError {                        //TODO FIX ERROR
+    //                     target: "last_run".to_string(),
+    //                     kind: ErrorKind::InvalidConfig("Last run parse error".to_string()),
+    //                 })?
+    //                 .with_timezone(&Utc),
+    //             None => Utc::now(),
+    //         };
+    //
+    //         let status: String = row
+    //             .get_by_name("status")
+    //             .map_err(|_| RepoError {
+    //                 target: "status".to_string(),
+    //                 kind: ErrorKind::InvalidConfig("Missing or invalid status".to_string()),
+    //             })?;
+    //         let job_status = JobStatus::from_string(&status);
+    //         let backoff_duration = Duration::from_secs(backoff_duration_secs as u64);
+    //         Ok(JobMetadata {
+    //             name: name.clone(),
+    //             backoff_duration,
+    //             check_interval,
+    //             last_run,
+    //             lock_ttl,
+    //             max_retries: max_retries as u32,
+    //             retry_attempts: retry_attempts as u32,
+    //             schedule,
+    //             state,
+    //             status: job_status
+    //         })
+    //     } else {
+    //         Err(RepoError {
+    //             target: name.0.clone(),
+    //             kind: ErrorKind::NotFound,
+    //         })
+    //     }
+    // }
 
 
     async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError> {
@@ -360,7 +360,7 @@ impl Repo for TheRepository {
                     })?;
                     return Ok(applied);
                 }
-           }
+            }
         } else {
             let insert_query = "INSERT INTO job.locks (job_name, owner, lock_status, lock_timestamp) VALUES (?, ?, ?, toTimestamp(now())) IF NOT EXISTS";
             let mut insert_statement = self.session.statement(insert_query);
@@ -401,7 +401,10 @@ impl Repo for TheRepository {
 
 
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError> {
-        let query = "UPDATE job.locks SET owner = null, lock_status = 'UNLOCKED' WHERE job_name = ? IF owner = ?";
+        let query = "UPDATE job.locks
+                SET owner = NULL, lock_status = 'UNLOCKED'
+                WHERE job_name = ?
+                IF lock_status = 'LOCKED' AND owner != NULL";
         let mut statement = self.session.statement(query);
         statement.bind(0, job_name).map_err(|e| {
             RepoError {
@@ -409,14 +412,14 @@ impl Repo for TheRepository {
                 kind: ErrorKind::BindError(e.into()),
             }
         })?;
-        statement
-            .bind(1, self.hostname.as_str())
-            .map_err(|e| RepoError {
-                target: "owner".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            })?;
+        // statement
+        //     .bind(1, self.hostname.as_str())
+        //     .map_err(|e| RepoError {
+        //         target: "owner".to_string(),
+        //         kind: ErrorKind::BindError(e.into()),
+        //     })?;
 
-        let result =  statement.execute().await.map_err(|e| {
+        let result = statement.execute().await.map_err(|e| {
             RepoError {
                 target: "job.locks".to_string(),
                 kind: ErrorKind::ExecuteError(e.into()),
@@ -503,62 +506,6 @@ impl Repo for TheRepository {
 
         Ok(())
     }
-
-
-
-    // async fn fetch_state(&self, id: String) -> Result<String, RepoError> {
-    //     let query = "SELECT state FROM icp_device.state WHERE id = ?;";
-    //     let mut statement = self.session.statement(query);
-    //
-    //     statement.bind_string(0, &id).map_err(|e| RepoError {
-    //         target: "id".to_string(),
-    //         kind: BindError(e.into()),
-    //     })?;
-    //
-    //     let result = statement.execute().await.map_err(|e| RepoError {
-    //         target: "icp_device.state".to_string(),
-    //         kind: ExecuteError(e.into()),
-    //     })?;
-    //
-    //     match result.first_row() {
-    //         None => Err(RepoError {
-    //             target: id.clone(),
-    //             kind: ErrorKind::RowAlreadyExists,
-    //         }),
-    //         Some(row) => {
-    //             let state: String = row.get_by_name("state").map_err(|e| RepoError {
-    //                 target: "state".to_string(),
-    //                 kind: ColumnError(e.into()),
-    //             })?;
-    //             Ok(state)
-    //         }
-    //     }
-    // }
-
-    // async fn get_job_state(&self, name: &JobName) -> Result<Arc<Mutex<Vec<u8>>>, RepoError> {
-    //     let query = "SELECT state FROM jobs WHERE name = ?;";
-    //     let mut statement = self.session.statement(query);
-    //
-    //     statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
-    //         target: name.0.clone(),
-    //         kind: ErrorKind::BindError(e.into()),
-    //     })?;
-    //
-    //     let result = statement.execute().await.map_err(|e| RepoError {
-    //         target: "job.jobs".to_string(),
-    //         kind: ErrorKind::ExecuteError(e.into()),
-    //     })?;
-    //
-    //     if let Some(row) = result.first_row() {
-    //         let state_bytes: Vec<u8> = row.get_by_name("state").unwrap();
-    //         Ok(Arc::new(Mutex::new(state_bytes))) // Wrap it as needed
-    //     } else {
-    //         Err(RepoError {
-    //             target: name.0.clone(),
-    //             kind: ErrorKind::NotFound,
-    //         })
-    //     }
-    // }
 }
 
 #[derive(Debug)]

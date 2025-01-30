@@ -2,7 +2,6 @@ use std::cmp::PartialEq;
 use crate::error::JobError;
 use crate::executor::JobExecutor;
 use crate::jobs::{JobCfg, JobMetadata, JobStatus};
-use crate::scheduler::Scheduler;
 use crate::JobName;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,6 +11,7 @@ use chrono::Utc;
 use tokio::sync::Mutex;
 use log::{info, warn};
 use crate::repo::Repo;
+use crate::schedule::JobSchedule;
 
 type JobFn = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> + Send + Sync>;
 
@@ -22,7 +22,6 @@ where
 {
     job_instance: String, // TODO: NEVER USED
     repo: Arc<R>,
-    pub scheduler: Arc<Mutex<Scheduler>>,
     pub job_executor:  Arc<JobExecutor<R>>,
     jobs: Arc<Mutex<Vec<(JobCfg, JobFn)>>>,
 }
@@ -31,11 +30,15 @@ where
 impl<R: Repo + Sync + Send + 'static> Manager<R> {
     pub fn new(job_instance: String, repo: R) -> Self {
         let repo_arc = Arc::new(repo);
+        let job_executor = Arc::new(JobExecutor {
+            id: "executor_1".to_string(), //TODO - Need to fix this!!
+            jobs: Arc::new(Mutex::new(vec![])),
+            repository: repo_arc.clone(),
+        });
         Manager {
             job_instance,
             repo: repo_arc.clone(),
-            scheduler: Arc::new(Mutex::new(Scheduler::new())),
-            job_executor: Arc::new(JobExecutor::new(Arc::new(Mutex::new(Scheduler::new())), repo_arc.clone())),
+            job_executor,
             jobs: Arc::new(Mutex::new(vec![])),
         }
     }
@@ -48,7 +51,6 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         let job_func_arc: JobFn = Arc::new(move |input| Box::pin(job_func(input)));
         let mut jobs = self.jobs.lock();
         jobs.await.push((config.clone(), job_func_arc));
-
         info!("Job '{}' registered successfully.", config.name);
     }
 
@@ -66,9 +68,9 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             self.run(job_cfg.clone(), move |input| {
                 let fut = job_func_cloned(input);
                 Box::pin(async move {
-                    fut.await.map_err(|e| anyhow::Error::msg(e.to_string()))
+                    fut.await.map_err(|e| JobError::JobExecutionFailed(e.to_string()))
                 })
-            }).await
+            }).await.map_err(|e| JobError::JobExecutionFailed(e.to_string()))
         } else {
             Err(JobError::JobExecutionFailed(format!(
                 "Job '{}' not found. Did you forget to register it?",
@@ -92,14 +94,10 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
     ) -> Result<(), JobError>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + Clone + 'static,
-        Fut: Future<Output = anyhow::Result<Vec<u8>>> + Send + 'static,
+        Fut: Future<Output = Result<Vec<u8>, JobError>> + Send + 'static,
     {
 
         job_cfg.validate()?;
-        let repo = self.repo.clone();
-        let scheduler = self.scheduler.clone();
-        let mut scheduler = scheduler.lock().await;
-        let job_executor = self.job_executor.clone();
 
         let job_metadata = JobMetadata {
             name: job_cfg.name.clone(),
@@ -113,7 +111,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             backoff_duration: job_cfg.backoff_duration,
             status: JobStatus::Initializing,
         };
-
+        let job_executor = self.job_executor.clone();
         job_executor
             .create_job(job_metadata.clone())
             .await
@@ -123,42 +121,15 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
 
         let job = Arc::new(move || {
             let job_metadata = job_metadata.clone();
-            let repo = repo.clone();
             let job_func = job_func.clone();
 
             async move {
-                let mut state = job_metadata.state.lock().await;
-                let mut result = job_func(state.clone()).await;
-                let mut attempts = 0;
-
-                while result.is_err() && attempts < job_metadata.max_retries {
-                    attempts += 1;
-                    let status = JobStatus::Retrying;
-                    repo.save_and_commit_state(&job_metadata.name, status.clone()).await?;
-
-                    if let Some(err) = result.as_ref().err() {
-                        warn!(
-                            "Job '{:?}' attempt {} failed: {}. Retrying after {:?}...",
-                            job_metadata.name, attempts, err, job_metadata.backoff_duration
-                        );
-                    }
-                    tokio::time::sleep(job_metadata.backoff_duration).await;
-                    result = job_func(state.clone()).await;
-                }
-                result.map(|_| ()).map_err(|e| JobError::JobExecutionFailed(format!("{}", e)))
+                job_executor
+                    .execute_job_with_retries(job_metadata, job_func)
+                    .await
+                    .map_err(|e| JobError::JobExecutionFailed(format!("{}", e)))
             }
         });
-
-        scheduler
-            .add(move || {
-                let job = job.clone();
-                Box::pin(async move {
-                    job().await.map_err(|e| anyhow::Error::msg(format!("{}", e)))
-                })
-            })
-            .await
-            .map_err(|e| JobError::SchedulerError(format!("{}", e)))?;
-
         Ok(())
     }
 

@@ -49,6 +49,11 @@ impl Error for JobError {
         }
     }
 }
+impl From<anyhow::Error> for JobError {
+    fn from(error: anyhow::Error) -> Self {
+        JobError::JobExecutionFailed(error.to_string())
+    }
+}
 
 impl From<RepoError> for JobError {
     fn from(error: RepoError) -> Self {

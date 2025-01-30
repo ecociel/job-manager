@@ -9,6 +9,8 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 use derive_more::Display;
+use log::warn;
+use crate::schedule::JobSchedule;
 
 #[derive(Clone, Debug)]
 pub struct JobMetadata {
@@ -19,7 +21,7 @@ pub struct JobMetadata {
     pub status: JobStatus,
     pub check_interval: Duration,
     pub lock_ttl: Duration,
-    pub schedule: Schedule,
+    pub schedule: JobSchedule,
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
@@ -65,13 +67,14 @@ pub struct JobCfg {
     pub name: JobName,
     pub check_interval: Duration,
     pub lock_ttl: Duration,
-    pub schedule: Schedule,
+    pub schedule: JobSchedule,
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
 }
 
 impl JobCfg {
+    //TODO: Add Cron validation
     pub fn validate(&self) -> Result<(), JobError> {
         if self.name.as_str().trim().is_empty() {
             return Err(JobError::InvalidConfig(
@@ -117,26 +120,35 @@ impl JobCfg {
 
 impl JobMetadata {
     pub fn due(&self, now: DateTime<Utc>) -> bool {
-        let mut upcoming = self.schedule.upcoming(Utc).take(1);
+        let mut upcoming = self.schedule.0.after(&now);
         if let Some(next_run) = upcoming.next() {
             let tolerance = 1;
             return (next_run - now).num_seconds().abs() <= tolerance;
         }
         false
     }
-
     pub async fn run<F, Fut>(
         &mut self,
         state: &mut Vec<u8>,
         last_run: &mut DateTime<Utc>,
-        _schedule: &Schedule, // TODO Not being used here Fix it!!
+        schedule: &JobSchedule,
         job_func: F,
-    ) -> Result<(), JobError>
+    ) -> anyhow::Result<()>
     where
         F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output = anyhow::Result<Vec<u8>, JobError>> + Send + 'static,
+        Fut: Future<Output=Result<Vec<u8>, JobError>> + Send + 'static,
     {
-        let now = Utc::now();
+        loop {
+            let now = Utc::now();
+            let mut upcoming = schedule.0.after(&now);
+
+            if let Some(run_time) = upcoming.next() {
+                if now < run_time {
+                    let wait_time = (run_time - now).to_std().unwrap_or(Duration::from_secs(1));
+                    tokio::time::sleep(wait_time).await;
+                }
+            }
+
             let mut attempt = 0;
             loop {
                 let new_state = job_func(state.clone()).await;
@@ -144,23 +156,21 @@ impl JobMetadata {
                 match new_state {
                     Ok(new_state) => {
                         *state = new_state;
-                        *last_run = now;
+                        *last_run = Utc::now();
                         return Ok(());
                     }
                     Err(e) if attempt < self.max_retries => {
                         attempt += 1;
-                        return Err(JobError::JobExecutionFailed(format!(
-                            "Job failed, retrying {}/{}: {}",
-                            attempt, self.max_retries, e
-                        )));
+                        warn!(
+                        "Job failed, retrying {}/{}: {}",
+                        attempt, self.max_retries, e
+                    );
                     }
                     Err(e) => {
-                        return Err(JobError::JobExecutionFailed(format!(
-                            "Job failed after {} attempts: {}",
-                            self.max_retries, e
-                        )));
+                        return Err(anyhow::anyhow!("Job failed after {} attempts: {}", self.max_retries, e));
                     }
                 }
             }
+        }
     }
 }
