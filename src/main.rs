@@ -19,7 +19,6 @@ fn main() {
         )
             .await
             .unwrap();
-        info!("I am here main 1");
         let mut manager = manager::Manager::new("job-instance-1".to_string(), repo.clone());
 
         let job1_cfg = JobCfg {
@@ -34,7 +33,6 @@ fn main() {
 
         let job1_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
             Box::pin(async move {
-                info!("Executing job1_func...");
                 let api_key = "utM6Q3AcxmVPSTTWGqYVSA==8YQTL2X38jLD3k6d";
                 let client = ClientBuilder::new()
                     .danger_accept_invalid_certs(true)

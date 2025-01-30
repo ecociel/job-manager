@@ -319,7 +319,7 @@ impl Repo for TheRepository {
         Ok(())
     }
     async fn acquire_lock(&self, job_name: &str) -> Result<bool, RepoError> {
-        let exists_query = "SELECT job_name, lock_holder FROM job.locks WHERE job_name = ?";
+        let exists_query = "SELECT job_name, owner ,lock_status FROM job.locks WHERE job_name = ?";
         let mut check_statement = self.session.statement(exists_query);
         check_statement.bind(0, job_name).map_err(|e| RepoError {
             target: "job_name".to_string(),
@@ -332,18 +332,15 @@ impl Repo for TheRepository {
         })?;
 
         if let Some(row) = exists_result.first_row() {
-            let lock_holder: Option<String> = match row.get_by_name::<String>("lock_holder".parse().unwrap()) {
-               Ok(value) => Some(value),
-                Err(_) => None,
-            };
+            let mut lock_status: Option<String> = row.get_by_name("lock_status").ok();
 
-            if let Some(_holder) = lock_holder {            //TODO - Check this logic again
+            if lock_status.as_deref() == Some("LOCKED") {
                 return Ok(false);
             } else {
-                let update_query = "UPDATE job.locks SET lock_holder = ?, lock_timestamp = toTimestamp(now()) WHERE job_name = ? IF lock_holder = NULL ";
+                let update_query = "UPDATE job.locks SET lock_status = 'LOCKED', owner = ? ,lock_timestamp = toTimestamp(now()) WHERE job_name = ? IF lock_status = 'UNLOCKED'";
                 let mut update_statement = self.session.statement(update_query);
                 update_statement.bind(0, self.hostname.as_str()).map_err(|e| RepoError {
-                    target: "lock_holder".to_string(),
+                    target: "owner".to_string(),
                     kind: ErrorKind::BindError(e.into()),
                 })?;
                 update_statement.bind(1, job_name).map_err(|e| RepoError {
@@ -365,7 +362,7 @@ impl Repo for TheRepository {
                 }
            }
         } else {
-            let insert_query = "INSERT INTO job.locks (job_name, lock_holder, lock_timestamp) VALUES (?, ?, toTimestamp(now())) IF NOT EXISTS";
+            let insert_query = "INSERT INTO job.locks (job_name, owner, lock_status, lock_timestamp) VALUES (?, ?, ?, toTimestamp(now())) IF NOT EXISTS";
             let mut insert_statement = self.session.statement(insert_query);
 
             insert_statement.bind(0, job_name).map_err(|e| RepoError {
@@ -373,7 +370,12 @@ impl Repo for TheRepository {
                 kind: ErrorKind::BindError(e.into()),
             })?;
             insert_statement.bind(1, self.hostname.as_str()).map_err(|e| RepoError {
-                target: "lock_holder".to_string(),
+                target: "owner".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            })?;
+
+            insert_statement.bind(2, "LOCKED").map_err(|e| RepoError {
+                target: "lock_status".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
 
@@ -398,27 +400,25 @@ impl Repo for TheRepository {
     }
 
 
-
-
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError> {
-        let query = "UPDATE job.locks SET lock_holder = null WHERE job_name = ? IF lock_holder = ?";
+        let query = "UPDATE job.locks SET owner = null, lock_status = 'UNLOCKED' WHERE job_name = ? IF owner = ?";
         let mut statement = self.session.statement(query);
         statement.bind(0, job_name).map_err(|e| {
             RepoError {
-                target: "state".to_string(),
+                target: "job_name".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             }
         })?;
         statement
             .bind(1, self.hostname.as_str())
             .map_err(|e| RepoError {
-                target: "lock_holder".to_string(),
+                target: "owner".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
 
         let result =  statement.execute().await.map_err(|e| {
             RepoError {
-                target: "job.jobs".to_string(),
+                target: "job.locks".to_string(),
                 kind: ErrorKind::ExecuteError(e.into()),
             }
         })?;
@@ -434,7 +434,7 @@ impl Repo for TheRepository {
                 Err(RepoError {
                     target: job_name.to_string(),
                     kind: ErrorKind::AcquireLockFailed(
-                        "Failed to release lock: lock_holder did not match.".to_string(),
+                        "Failed to release lock: lock_status did not match.".to_string(),
                     ),
                 })
             }
@@ -445,58 +445,65 @@ impl Repo for TheRepository {
         })
     }
 
-     async fn release_all_locks(&self) -> Result<(), RepoError> {
-        let query = "UPDATE job.locks SET lock_holder = null WHERE job_name IN
-                 (SELECT job_name FROM job.locks WHERE lock_holder = ?)
-                 IF lock_holder = ?";
+    async fn release_all_locks(&self) -> Result<(), RepoError> {
+        let select_query = "SELECT job_name FROM job.locks WHERE lock_status = 'LOCKED' ALLOW FILTERING";
+        let mut select_stmt = self.session.statement(select_query);
 
-        let mut statement = self.session.statement(query);
-
-        statement.bind(0, self.hostname.as_str()).map_err(|e| {
-            RepoError {
-                target: "lock_holder".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            }
+        let result = select_stmt.execute().await.map_err(|e| RepoError {
+            target: "job.locks".to_string(),
+            kind: ErrorKind::ExecuteError(e.into()),
         })?;
 
-        statement.bind(1, self.hostname.as_str()).map_err(|e| {
-            RepoError {
-                target: "lock_holder".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            }
-        })?;
+        let mut job_names: Vec<String> = Vec::new();
 
-        let result = statement.execute().await.map_err(|e| {
-            RepoError {
-                target: "job.locks".to_string(),
-                kind: ErrorKind::ExecuteError(e.into()),
-            }
-        })?;
+        for row in result.first_row() {
+            let job_name: String = row.get_by_name("job_name").map_err(|e| RepoError {
+                target: "job_name".to_string(),
+                kind: ErrorKind::ColumnError(e.into()),
+            })?;
+            job_names.push(job_name);
+        }
 
-        if let Some(row) = result.first_row() {
-            let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
-                target: "job.locks - [applied] status".to_string(),
+        if job_names.is_empty() {
+            eprintln!("No active locks found for this instance.");
+            return Ok(());
+        }
+
+        let update_query = "UPDATE job.locks SET owner = null, lock_status = 'UNLOCKED' WHERE job_name = ? IF lock_status = 'LOCKED'";
+
+        for job_name in job_names {
+            let mut update_stmt = self.session.statement(update_query);
+
+            update_stmt.bind(0, job_name.as_str()).map_err(|e| RepoError {
+                target: job_name.clone(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
 
-            return if applied {
-                eprintln!("All locks released successfully.");
-                Ok(())
-            } else {
-                Err(RepoError {
-                    target: "job.locks".to_string(),
-                    kind: ErrorKind::AcquireLockFailed(
-                        "Failed to release all locks: lock_holder did not match.".to_string(),
-                    ),
-                })
-            };
+            let result = update_stmt.execute().await.map_err(|e| RepoError {
+                target: job_name.clone(),
+                kind: ErrorKind::ExecuteError(e.into()),
+            })?;
+
+            if let Some(row) = result.first_row() {
+                let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
+                    target: format!("job.locks - [applied] status for {}", job_name),
+                    kind: ErrorKind::ColumnError(e.into()),
+                })?;
+
+                if applied {
+                    eprintln!("Lock released for job: {}", job_name);
+                } else {
+                    eprintln!(
+                        "Warning: Lock for job {} was not released. It may have been acquired by another instance.",
+                        job_name
+                    );
+                }
+            }
         }
 
-        Err(RepoError {
-            target: "job.locks".to_string(),
-            kind: ErrorKind::AcquireLockFailed("Failed to release all locks due to unknown reasons.".to_string()),
-        })
+        Ok(())
     }
+
 
 
     // async fn fetch_state(&self, id: String) -> Result<String, RepoError> {

@@ -64,18 +64,15 @@ where
     {
         let repository = self.repository.clone();
 
-        tokio::spawn(async move {
-            if let Err(e) = Self::wait_for_shutdown(repository.clone()).await {
-                eprintln!("Shutdown error: {}", e);
-            }
-        });
-
         loop {
             let now = Utc::now();
             let jobs = self.jobs.lock().await.clone();
 
             for job in jobs.iter() {
                 if job.due(now) {
+                    if let Err(err) = self.repository.release_all_locks().await {
+                        eprintln!("Warning: Failed to release previous locks for job {:?}: {}", &job.name.0, err);
+                    }
                     let lock_acquired = self.repository
                         .acquire_lock(&job.name.0)
                         .await
@@ -121,15 +118,15 @@ where
             sleep(std::time::Duration::from_secs(1)).await;
         }
     }
-    pub async fn wait_for_shutdown(repository: Arc<R>) -> Result<(), JobError> {
-        signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
-
-        eprintln!("Shutting down... Releasing all locks.");
-        repository.release_all_locks().await.map_err(|e| {
-            JobError::JobExecutionFailed(format!("Failed to release locks during shutdown: {}", e))
-        })?;
-
-        eprintln!("All locks released. Exiting.");
-        Ok(())
-    }
+    // pub async fn wait_for_shutdown(repository: Arc<R>) -> Result<(), JobError> {
+    //     signal::ctrl_c().await.expect("Failed to listen for Ctrl+C");
+    //
+    //     eprintln!("Shutting down... Releasing all locks.");
+    //     repository.release_all_locks().await.map_err(|e| {
+    //         JobError::JobExecutionFailed(format!("Failed to release locks during shutdown: {}", e))
+    //     })?;
+    //
+    //     eprintln!("All locks released. Exiting.");
+    //     Ok(())
+    // }
 }
