@@ -1,3 +1,4 @@
+use std::env;
 use std::future::Future;
 use std::pin::Pin;
 use cron::Schedule;
@@ -34,7 +35,13 @@ fn main() {
 
         let job1_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
             Box::pin(async move {
-                let api_key = "utM6Q3AcxmVPSTTWGqYVSA==8YQTL2X38jLD3k6d";
+                let api_key = match env::var("API_KEY") {
+                    Ok(val) => val,
+                    Err(_) => {
+                        eprintln!("API_KEY environment variable not set.");
+                        return Err(JobError::JobExecutionFailed("Missing API_KEY".to_string()));
+                    }
+                };
                 let client = ClientBuilder::new()
                     .danger_accept_invalid_certs(true)
                     .build()
@@ -48,13 +55,16 @@ fn main() {
                     .map_err(|e| {
                         JobError::JobExecutionFailed(format!("HTTP request failed: {}", e))
                     })?;
-
+                let mut new_state = state.clone();
                 if response.status().is_success() {
-                    println!("Job 1: HTTP request successful: {:?}", response.text().await);
+                    println!("Job 1: HTTP request successful with status: {}", response.status());
+                    new_state = b"200 OK".to_vec();
                 } else {
                     println!("Job 1: HTTP request failed with status: {}", response.status());
+                    new_state = b"Failed".to_vec();
                 }
-                Ok(state)
+
+                Ok(new_state)
             })
         };
         manager.register(job1_cfg.clone(), job1_func).await;

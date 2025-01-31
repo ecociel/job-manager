@@ -26,6 +26,19 @@ pub struct JobMetadata {
     pub max_retries: u32,
     pub backoff_duration: Duration,
 }
+
+impl JobMetadata {
+    pub fn due(&self, now: DateTime<Utc>) -> bool {
+        let mut upcoming = self.schedule.0.after(&now);
+        if let Some(next_run) = upcoming.next() {
+            let tolerance = 1;
+            let is_due = (next_run - now).num_seconds().abs() <= tolerance;
+            eprintln!("Checking if job {:?} is due: {}", self.name, is_due);
+            return is_due;
+        }
+        false
+    }
+}
 #[derive(Debug, Clone, PartialEq,Display)]
 pub enum JobStatus {
     #[display(fmt = "initializing")]
@@ -34,8 +47,8 @@ pub enum JobStatus {
     Running,
     #[display(fmt = "retrying")]
     Retrying,
-    #[display(fmt = "failed")]
-    Failed,
+    #[display(fmt = "failed: {}",_0)]
+    Failed(String),
     #[display(fmt = "completed")]
     Completed,
 }
@@ -46,16 +59,19 @@ impl JobStatus {
             JobStatus::Initializing => "initializing".to_string(),
             JobStatus::Running => "running".to_string(),
             JobStatus::Retrying => "retrying".to_string(),
-            JobStatus::Failed => "failed".to_string(),
+            JobStatus::Failed(reason) => format!("failed: {}", reason),
             JobStatus::Completed => "completed".to_string(),
         }
     }
 
     pub fn from_string(status: &str) -> Self {
+        if status.starts_with("failed: ") {
+            let reason = status.strip_prefix("failed: ").unwrap_or("Unknown error").to_string();
+            return JobStatus::Failed(reason);
+        }
         match status {
             "running" => JobStatus::Running,
             "retrying" => JobStatus::Retrying,
-            "failed" => JobStatus::Failed,
             "completed" => JobStatus::Completed,
             _ => JobStatus::Initializing,
         }
@@ -118,59 +134,51 @@ impl JobCfg {
     }
 }
 
-impl JobMetadata {
-    pub fn due(&self, now: DateTime<Utc>) -> bool {
-        let mut upcoming = self.schedule.0.after(&now);
-        if let Some(next_run) = upcoming.next() {
-            let tolerance = 1;
-            return (next_run - now).num_seconds().abs() <= tolerance;
-        }
-        false
-    }
-    pub async fn run<F, Fut>(
-        &mut self,
-        state: &mut Vec<u8>,
-        last_run: &mut DateTime<Utc>,
-        schedule: &JobSchedule,
-        job_func: F,
-    ) -> anyhow::Result<()>
-    where
-        F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
-        Fut: Future<Output=Result<Vec<u8>, JobError>> + Send + 'static,
-    {
-        loop {
-            let now = Utc::now();
-            let mut upcoming = schedule.0.after(&now);
 
-            if let Some(run_time) = upcoming.next() {
-                if now < run_time {
-                    let wait_time = (run_time - now).to_std().unwrap_or(Duration::from_secs(1));
-                    tokio::time::sleep(wait_time).await;
-                }
-            }
+// pub async fn run<F, Fut>(
+    //     &mut self,
+    //     state: &mut Vec<u8>,
+    //     last_run: &mut DateTime<Utc>,
+    //     schedule: &JobSchedule,
+    //     job_func: F,
+    // ) -> anyhow::Result<()>
+    // where
+    //     F: Fn(Vec<u8>) -> Fut + Send + Sync + 'static,
+    //     Fut: Future<Output=Result<Vec<u8>, JobError>> + Send + 'static,
+    // {
+    //     loop {
+    //         let now = Utc::now();
+    //         let mut upcoming = schedule.0.after(&now);
+    //
+    //         if let Some(run_time) = upcoming.next() {
+    //             if now < run_time {
+    //                 let wait_time = (run_time - now).to_std().unwrap_or(Duration::from_secs(1));
+    //                 tokio::time::sleep(wait_time).await;
+    //             }
+    //         }
+    //
+    //         let mut attempt = 0;
+    //         loop {
+    //             let new_state = job_func(state.clone()).await;
+    //
+    //             match new_state {
+    //                 Ok(new_state) => {
+    //                     *state = new_state;
+    //                     *last_run = Utc::now();
+    //                     return Ok(());
+    //                 }
+    //                 Err(e) if attempt < self.max_retries => {
+    //                     attempt += 1;
+    //                     warn!(
+    //                     "Job failed, retrying {}/{}: {}",
+    //                     attempt, self.max_retries, e
+    //                 );
+    //                 }
+    //                 Err(e) => {
+    //                     return Err(anyhow::anyhow!("Job failed after {} attempts: {}", self.max_retries, e));
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
-            let mut attempt = 0;
-            loop {
-                let new_state = job_func(state.clone()).await;
-
-                match new_state {
-                    Ok(new_state) => {
-                        *state = new_state;
-                        *last_run = Utc::now();
-                        return Ok(());
-                    }
-                    Err(e) if attempt < self.max_retries => {
-                        attempt += 1;
-                        warn!(
-                        "Job failed, retrying {}/{}: {}",
-                        attempt, self.max_retries, e
-                    );
-                    }
-                    Err(e) => {
-                        return Err(anyhow::anyhow!("Job failed after {} attempts: {}", self.max_retries, e));
-                    }
-                }
-            }
-        }
-    }
-}

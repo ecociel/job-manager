@@ -74,7 +74,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
                 check_interval: job_cfg.check_interval,
                 lock_ttl: job_cfg.lock_ttl,
                 schedule: job_cfg.schedule.clone(),
-                state: Arc::new(Mutex::new(vec![0])), //TODO: This is not used properly
+                state: Arc::new(Mutex::new(vec![0])),
                 last_run: Utc::now(),
                 retry_attempts: job_cfg.retry_attempts,
                 max_retries: job_cfg.max_retries,
@@ -102,7 +102,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
     where
         F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send +Copy + Sync + Clone + 'static,
     {
-        info!("Starting all scheduled jobs...");
+        eprintln!("Starting all scheduled jobs...");
         match self.job_executor.start(job_func).await {
             Ok(_) => {
                 info!("All jobs started successfully");

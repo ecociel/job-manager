@@ -265,7 +265,7 @@ impl Repo for TheRepository {
     // }
 
     //TODO: Rename the query if required or choose state or status ???
-    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus) -> Result<(), RepoError> {
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
             "SELECT name FROM job.jobs WHERE name = ?;",
         );
@@ -284,23 +284,30 @@ impl Repo for TheRepository {
         })?;
         //TODO: We need to update last run as well
         if result.first_row().is_some() {
-            eprintln!("Job found. Updating state for job: {:?}", name);
             let mut update_statement = self.session.statement(
-                "UPDATE job.jobs SET status = ? WHERE name = ?;",
+                "UPDATE job.jobs SET state = ? ,status = ? WHERE name = ?;",
             );
+            update_statement.bind(0, state).map_err(|e| {
+                RepoError {
+                    target: "state".to_string(),
+                    kind: ErrorKind::BindError(e.into()),
+                }
+            })?;
             let status_str = status.to_string();
-            update_statement.bind(0, status_str.as_str()).map_err(|e| {
+            update_statement.bind(1, status_str.as_str()).map_err(|e| {
                 RepoError {
                     target: "status".to_string(),
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
-            update_statement.bind(1, name.0.as_str()).map_err(|e| {
+            update_statement.bind(2, name.0.as_str()).map_err(|e| {
                 RepoError {
                     target: name.0.clone(),
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
+
+
 
             update_statement.execute().await.map_err(|e| {
                 RepoError {
