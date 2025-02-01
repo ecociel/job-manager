@@ -60,7 +60,6 @@ where
     where
         F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>>
         + Send
-        + Copy
         + Sync
         + Clone
         + 'static,

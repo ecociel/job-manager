@@ -1,14 +1,12 @@
 use std::env;
 use std::future::Future;
 use std::pin::Pin;
-use cron::Schedule;
 use job::cassandra::TheRepository;
 use job::error::JobError;
 use job::{manager, JobCfg, JobName};
-use std::str::FromStr;
 use std::time::Duration;
 use log::info;
-use reqwest::ClientBuilder;
+use reqwest::Client;
 use tokio::runtime::Runtime;
 use job::schedule::JobSchedule;
 
@@ -23,6 +21,11 @@ fn main() {
             .unwrap();
         let mut manager = manager::Manager::new("job-instance-1".to_string(), repo.clone());
 
+        let client = Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .expect("Failed to create HTTP client");
+
         let job1_cfg = JobCfg {
             name: JobName("job1".to_string()),
             check_interval: Duration::from_secs(5),
@@ -33,7 +36,8 @@ fn main() {
             backoff_duration: Duration::from_secs(2)
         };
 
-        let job1_func = |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
+        let job1_func = move |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
+            let client = client.clone();
             Box::pin(async move {
                 let api_key = match env::var("API_KEY") {
                     Ok(val) => val,
@@ -42,10 +46,6 @@ fn main() {
                         return Err(JobError::JobExecutionFailed("Missing API_KEY".to_string()));
                     }
                 };
-                let client = ClientBuilder::new()
-                    .danger_accept_invalid_certs(true)
-                    .build()
-                    .expect("Failed to create client");
 
                 let response = client
                     .get("https://api.api-ninjas.com/v1/interestrate")
@@ -55,6 +55,7 @@ fn main() {
                     .map_err(|e| {
                         JobError::JobExecutionFailed(format!("HTTP request failed: {}", e))
                     })?;
+
                 let mut new_state = state.clone();
                 if response.status().is_success() {
                     println!("Job 1: HTTP request successful with status: {}", response.status());
@@ -67,14 +68,13 @@ fn main() {
                 Ok(new_state)
             })
         };
-        manager.register(job1_cfg.clone(), job1_func).await;
+
+        manager.register(job1_cfg.clone(), job1_func.clone()).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
 
-        manager.run(&job1_cfg.name.clone(), job1_cfg.clone(), job1_func).await.expect("TODO: panic message");
+        manager.run(&job1_cfg.name.clone(), job1_cfg.clone(), job1_func.clone()).await.expect("TODO: panic message");
 
         manager.start(job1_func).await.expect("Job 1 run failed");
-
     });
 }
-

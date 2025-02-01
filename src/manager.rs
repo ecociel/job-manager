@@ -100,7 +100,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
 
     pub async fn start<F>(&self,job_func: F) -> Result<(), JobError>
     where
-        F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send +Copy + Sync + Clone + 'static,
+        F: Fn(Vec<u8>) -> Pin<Box<dyn Future<Output=Result<Vec<u8>, JobError>> + Send>> + Send + Sync + Clone + 'static,
     {
         eprintln!("Starting all scheduled jobs...");
         match self.job_executor.start(job_func).await {
