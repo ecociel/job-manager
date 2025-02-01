@@ -5,7 +5,6 @@ use job::cassandra::TheRepository;
 use job::error::JobError;
 use job::{manager, JobCfg, JobName};
 use std::time::Duration;
-use log::info;
 use reqwest::Client;
 use tokio::runtime::Runtime;
 use job::schedule::JobSchedule;
@@ -69,11 +68,9 @@ fn main() {
             })
         };
 
-        manager.register(job1_cfg.clone(), job1_func.clone()).await;
+        manager.register(job1_cfg.clone(),job1_func.clone()).await;
 
         tokio::time::sleep(Duration::from_secs(1)).await;
-
-        manager.run(&job1_cfg.name.clone(), job1_cfg.clone(), job1_func.clone()).await.expect("TODO: panic message");
 
         manager.start(job1_func).await.expect("Job 1 run failed");
     });

@@ -2,14 +2,11 @@ use crate::error::JobError;
 use crate::JobName;
 use chrono::{DateTime, Utc};
 use cron::Schedule;
-use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
-use tokio::time::sleep;
 use derive_more::Display;
-use log::warn;
 use crate::schedule::JobSchedule;
 
 #[derive(Clone, Debug)]
