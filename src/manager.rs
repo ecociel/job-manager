@@ -52,6 +52,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
         let job_func_arc: JobFn = Arc::new(move |input| Box::pin(job_func(input)));
         let mut jobs = self.jobs.lock().await;
         jobs.push((job_cfg.clone(), job_func_arc));
+
         job_cfg.validate().unwrap();
 
         let job_metadata = JobMetadata {
@@ -65,6 +66,7 @@ impl<R: Repo + Sync + Send + 'static> Manager<R> {
             max_retries: job_cfg.max_retries,
             backoff_duration: job_cfg.backoff_duration,
             status: JobStatus::Initializing,
+            timeout: job_cfg.timeout,
         };
 
         let job_executor = self.job_executor.clone();

@@ -4,7 +4,7 @@ use crate::JobMetadata;
 use chrono::Utc;
 use std::sync::Arc;
 use log::warn;
-use tokio::signal;
+use tokio::{signal, spawn};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
@@ -12,6 +12,7 @@ use crate::error::JobError;
 use crate::jobs::JobStatus;
 use crate::manager::Manager;
 use crate::repo::Repo;
+use tokio::time::Duration;
 
 
 pub struct JobExecutor<R>
@@ -19,7 +20,6 @@ where
     R: Repo + Send + Sync + 'static,
 {
     pub(crate) id: String,  // TODO NOT USED - Do we need this. If yes why ?
-    //TODO And do we need a separate Table to maintain the executor ?
     pub(crate) jobs: Arc<Mutex<Vec<JobMetadata>>>,
     pub(crate) repository: Arc<R>,
 }
@@ -71,19 +71,42 @@ where
             let mut job_clone = job.clone();
             let state_clone = job.state.clone();
             let job_func_clone = job_func.clone();
+            let repository_clone1 = repository_clone.clone();//TODO Fix this
+
 
             let handle = tokio::spawn(async move {
                 loop {
+                    let job_name = job_clone.name.0.clone();
                     let now = Utc::now();
                     if job_clone.due(now) {
-                        let lock_acquired = repository_clone
-                            .acquire_lock(&job_clone.name.0)
+                        let lock_acquired = repository_clone1
+                            .acquire_lock(&job_name)
                             .await
                             .unwrap_or(false);
 
                         eprintln!("Lock acquired for job {:?}: {:?}", job_clone.name, lock_acquired);
-
+                        let repository_clone2 = repository_clone.clone(); //TODO Fix this
                         if lock_acquired {
+                            let lock_ttl = job_clone.lock_ttl;
+                            let lock_toucher_handle = spawn(async move {
+                                let mut ttl = lock_ttl;
+                                loop {
+                                    let half_ttl_secs = ttl.as_secs() / 2;
+                                    let half_ttl_duration = Duration::from_secs(half_ttl_secs);
+                                    sleep(half_ttl_duration).await;
+                                    let update_result = repository_clone2.update_lock_ttl(&job_name, ttl).await;
+                                    if let Err(e) = update_result {
+                                        eprintln!("Error updating TTL for job {}",e);
+                                    } else {
+                                        eprintln!("Lock TTL updated for job");
+                                    }
+                                    ttl /= 2;
+                                    if ttl <= Duration::from_secs(1) {
+                                        break;
+                                    }
+                                }
+                            });
+
                             let result = async {
                                 let mut state = state_clone.lock().await.clone();
                                 let mut last_run = job_clone.last_run;
@@ -92,7 +115,7 @@ where
 
                                 loop {
                                     let job_execution = timeout(
-                                        job_clone.lock_ttl,
+                                        job_clone.timeout,
                                         job_func_clone(state.clone())
                                     ).await;
 
@@ -146,6 +169,7 @@ where
                             if let Err(e) = result.await {
                                 eprintln!("Job execution error: {}", e);
                             }
+                            lock_toucher_handle.abort();
                             if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
                                 eprintln!("Failed to release lock for job {:?}: {}", &job_clone.name.0, err);
                             }

@@ -22,6 +22,7 @@ pub struct JobMetadata {
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
+    pub timeout: Duration,
 }
 
 impl JobMetadata {
@@ -84,6 +85,7 @@ pub struct JobCfg {
     pub retry_attempts: u32,
     pub max_retries: u32,
     pub backoff_duration: Duration,
+    pub timeout: Duration,
 }
 
 impl JobCfg {

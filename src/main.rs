@@ -28,11 +28,12 @@ fn main() {
         let job1_cfg = JobCfg {
             name: JobName("job1".to_string()),
             check_interval: Duration::from_secs(5),
-            lock_ttl: Duration::from_secs(60),
+            lock_ttl: Duration::from_secs(30),
             schedule: JobSchedule::secondly(),
             retry_attempts: 1,
             max_retries: 3,
-            backoff_duration: Duration::from_secs(2)
+            backoff_duration: Duration::from_secs(2),
+            timeout: Duration::from_secs(60)
         };
 
         let job1_func = move |state: Vec<u8>| -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> {
@@ -45,6 +46,9 @@ fn main() {
                         return Err(JobError::JobExecutionFailed("Missing API_KEY".to_string()));
                     }
                 };
+
+                // println!("Simulating a long-running job...");
+                // tokio::time::sleep(Duration::from_secs(30)).await;
 
                 let response = client
                     .get("https://api.api-ninjas.com/v1/interestrate")
