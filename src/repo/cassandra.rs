@@ -9,11 +9,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration};
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use cron::Schedule;
 use crate::{JobMetadata, JobName};
 use tokio::sync::Mutex;
-use crate::cassandra::ErrorKind::RowAlreadyExists;
+use crate::cassandra::ErrorKind::{CustomError, RowAlreadyExists};
 use crate::repo::Repo;
 use gethostname::gethostname;
 use crate::jobs::JobStatus;
@@ -161,9 +161,8 @@ impl Repo for TheRepository {
      async fn update_lock_ttl(&self, name: &str, ttl: Duration) -> Result<(), RepoError> {
         let query = "
         UPDATE job.jobs
-        SET lock_ttl = ?, last_updated = toTimestamp(now())
-        WHERE name = ? IF lock_status = 'LOCKED';
-    ";
+        SET lock_ttl = ?
+        WHERE name = ? IF lock_status = 'LOCKED'";
 
         let mut statement = self.session.statement(query);
          let ttl_seconds = ttl.as_secs() as i32;
@@ -196,9 +195,6 @@ impl Repo for TheRepository {
 
          Ok(())
     }
-
-
-
 
     //TODO: Rename the query if required or choose state or status ???
     async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>,last_run: DateTime<Utc>) -> Result<(), RepoError> {
@@ -236,10 +232,11 @@ impl Repo for TheRepository {
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
-            let last_run_timestamp = last_run.timestamp_millis() as i64;
-            update_statement.bind(2, last_run_timestamp).map_err(|e| {
+            //let last_run_timestamp = last_run.timestamp_millis() as i64;
+            let last_run = Utc::now().timestamp_millis();
+            update_statement.bind(2, last_run).map_err(|e| {
                 RepoError {
-                    target: name.0.clone(),
+                    target: last_run.to_string(),
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
@@ -409,6 +406,42 @@ impl Repo for TheRepository {
                 "Failed to release lock: lock_status did not match.".to_string(),
             ),
         })
+    }
+
+
+    async fn get_last_run_time(&self, job_name: &str) -> Result<Option<i64>, RepoError> {
+        let query = "SELECT last_run FROM job.jobs WHERE name = ?";
+
+        let mut statement = self.session.statement(query);
+        statement.bind(0, job_name).map_err(|e| RepoError {
+            target: "job_name".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
+        let result = statement.execute().await.map_err(|e| RepoError {
+            target: "job.jobs".to_string(),
+            kind: ErrorKind::ExecuteError(e.into()),
+        })?;
+
+        if let Some(row) = result.first_row() {
+
+            let last_run_timestamp: i64 = row.get_by_name("last_run").map_err(|e| RepoError {
+                target: "job.jobs - last_run".to_string(),
+                kind: ErrorKind::ColumnError(e.into()),
+            })?;
+
+            let last_run = match Utc.timestamp_opt(last_run_timestamp, 0) {
+                chrono::LocalResult::Single(dt) => dt,
+                _ => {
+                    return Err(RepoError {
+                        target: "job.jobs - last_run".to_string(),
+                        kind: ErrorKind::CustomError("Invalid timestamp".to_string()),
+                    });
+                }
+            };
+            return Ok(Some(last_run.timestamp_millis()));
+        }
+        Ok(None)
     }
 
 
@@ -635,7 +668,7 @@ pub enum ErrorKind {
     InvalidConfig(String),
     AcquireLockFailed(String),
     UpdateLockTtlFailed(CassandraErrorKind),
-
+    CustomError(String),
     NotFound,
 }
 
@@ -666,7 +699,7 @@ impl Display for RepoError {
             ColumnError(err) => write!(f, "error in fetching column:{}-{}", self.target, err),
             InvalidTimeStamp => write!(f, "Invalid timestamp:{}", self.target),
             UpdateLockTtlFailed => write!(f,"Failed to update lock to ttl"),
-
+            CustomError(err) => write!(f,"Error: {}", err),
             ErrorKind::RowAlreadyExists => write!(
                 f,
                 "Row with the given ID already exists in the database: {}",
