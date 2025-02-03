@@ -24,8 +24,7 @@ pub trait Repo {
                         status: JobStatus,
                         ) -> Result<(), RepoError>;
     async fn update_lock_ttl(&self, job_name: &str, ttl: Duration) -> Result<(), RepoError>;
-    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus,state: Vec<u8>) -> Result<(), RepoError>;
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus,state: Vec<u8>,last_run: DateTime<Utc>) -> Result<(), RepoError>;
     async fn acquire_lock(&self, name: &str) -> Result<bool,RepoError>;
     async fn release_lock(&self, job_name: &str) -> Result<(), RepoError>;
-
 }

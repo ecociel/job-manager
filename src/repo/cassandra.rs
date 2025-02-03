@@ -164,11 +164,6 @@ impl Repo for TheRepository {
         SET lock_ttl = ?, last_updated = toTimestamp(now())
         WHERE name = ? IF lock_status = 'LOCKED';
     ";
-    //      let query = "
-    //     UPDATE job.jobs
-    //     SET lock_ttl = ?
-    //     WHERE name = ?;
-    // ";
 
         let mut statement = self.session.statement(query);
          let ttl_seconds = ttl.as_secs() as i32;
@@ -206,7 +201,7 @@ impl Repo for TheRepository {
 
 
     //TODO: Rename the query if required or choose state or status ???
-    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>) -> Result<(), RepoError> {
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>,last_run: DateTime<Utc>) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
             "SELECT name FROM job.jobs WHERE name = ?;",
         );
@@ -223,10 +218,10 @@ impl Repo for TheRepository {
                 kind: ErrorKind::ExecuteError(e.into()),
             }
         })?;
-        //TODO: We need to update last run as well
+
         if result.first_row().is_some() {
             let mut update_statement = self.session.statement(
-                "UPDATE job.jobs SET state = ? ,status = ? WHERE name = ?;",
+                "UPDATE job.jobs SET state = ? ,status = ?, last_run = ? WHERE name = ?;",
             );
             update_statement.bind(0, state).map_err(|e| {
                 RepoError {
@@ -241,13 +236,19 @@ impl Repo for TheRepository {
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
-            update_statement.bind(2, name.0.as_str()).map_err(|e| {
+            let last_run_timestamp = last_run.timestamp_millis() as i64;
+            update_statement.bind(2, last_run_timestamp).map_err(|e| {
                 RepoError {
                     target: name.0.clone(),
                     kind: ErrorKind::BindError(e.into()),
                 }
             })?;
-
+            update_statement.bind(3, name.0.as_str()).map_err(|e| {
+                RepoError {
+                    target: name.0.clone(),
+                    kind: ErrorKind::BindError(e.into()),
+                }
+            })?;
 
 
             update_statement.execute().await.map_err(|e| {

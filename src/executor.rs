@@ -133,7 +133,7 @@ where
                                             last_run = Utc::now();
 
                                             repository_clone
-                                                .save_and_commit_state(&job_clone.name, JobStatus::Completed, new_state.clone())
+                                                .save_and_commit_state(&job_clone.name, JobStatus::Completed, new_state.clone(),last_run)
                                                 .await
                                                 .map_err(|e| JobError::JobExecutionFailed(format!(
                                                     "Failed to update job to Completed: {}", e
@@ -150,7 +150,7 @@ where
                                         Ok(Err(e)) => {
                                             eprintln!("Job {:?} failed after {} attempts: {}", job_clone.name, max_retries, e);
                                             repository_clone
-                                                .save_and_commit_state(&job_clone.name, JobStatus::Failed(e.to_string()), state)
+                                                .save_and_commit_state(&job_clone.name, JobStatus::Failed(e.to_string()), state, last_run)
                                                 .await
                                                 .map_err(|e| JobError::JobExecutionFailed(format!(
                                                     "Failed to update job to Failed: {}", e
@@ -162,7 +162,7 @@ where
                                         Err(e) => {
                                             eprintln!("Job {:?} timed out", &job_clone.name.0);
                                             repository_clone
-                                                .save_and_commit_state(&job_clone.name, JobStatus::Failed(e.to_string()), state)
+                                                .save_and_commit_state(&job_clone.name, JobStatus::Failed(e.to_string()), state,last_run)
                                                 .await
                                                 .map_err(|e| JobError::JobExecutionFailed(format!(
                                                     "Failed to update job to Failed: {}", e
