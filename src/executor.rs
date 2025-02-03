@@ -3,7 +3,7 @@ use std::pin::Pin;
 use crate::JobMetadata;
 use chrono::{DateTime, MappedLocalTime, TimeZone, Utc};
 use std::sync::Arc;
-use log::warn;
+use log::{info, warn};
 use tokio::{signal, spawn};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -113,11 +113,11 @@ where
 
             handles.push(handle);
         }
-        //let monitoring_handle = tokio::spawn(Self::monitor_jobs(self.repository.clone(), self.jobs.clone()));
+        let monitoring_handle = tokio::spawn(Self::monitor_jobs(self.repository.clone(), self.jobs.clone()));
         for handle in handles {
             let _ = handle.await;
         }
-        //let _ = monitoring_handle.await;
+        let _ = monitoring_handle.await;
         Ok(())
     }
 
@@ -184,11 +184,11 @@ where
                     min_ttl
                 };
                 sleep(new_ttl).await;
-                if let Err(e) = repository.update_lock_ttl(&job_name, ttl).await {
+                if let Err(e) = repository.update_lock_ttl(&job_name, new_ttl).await {
                     eprintln!("Error updating TTL for job {}: {}", job_name, e);
                     break;
                 }
-                eprintln!("Lock TTL updated for job {:?} to {:?}", job_name,ttl);
+               eprintln!("Lock TTL updated for job {:?} to {:?}", job_name, new_ttl);
                 ttl = new_ttl;
             } else {
                 eprintln!("Lock TTL too small, stopping updates.");
@@ -197,44 +197,30 @@ where
         }
     }
 
-    //TODO : Not used as of now
     async fn monitor_jobs(repository: Arc<dyn Repo>, jobs: Arc<Mutex<Vec<JobMetadata>>>) {
         loop {
-            let jobs = jobs.lock().await.clone();
+            let jobs = jobs.lock().await;
 
             for job_metadata in jobs.iter() {
                 let job_name = job_metadata.name.0.clone();
 
                 if let Ok(Some(last_run)) = repository.get_last_run_time(&job_name).await {
                     let now = Utc::now();
+                    let last_run_dt = Utc.timestamp_millis(last_run);
 
-                    let last_run_dt_opt = Utc.timestamp_millis_opt(last_run);
-                    match last_run_dt_opt {
-                        chrono::LocalResult::Single(last_run_dt) => {
-                            let elapsed = now - last_run_dt;
-                            eprintln!(
-                                "Job: {:?}, now: {:?}, last_run: {:?}, elapsed: {:?}",
-                                job_name, now, last_run, elapsed
-                            );
+                    let elapsed = now - last_run_dt;
 
-                            if let Ok(elapsed_duration) = elapsed.to_std() {
-                                if elapsed_duration > job_metadata.lock_ttl {
-                                    eprintln!("Job {:?} appears stuck. Releasing lock.", job_name);
-                                    if let Err(err) = repository.release_lock(&job_name).await {
-                                        eprintln!("Failed to release lock for job {:?}: {}", job_name, err);
-                                    }
-                                }
-                            } else {
-                                eprintln!(
-                                    "Warning: Negative elapsed time for job {:?}, skipping comparison.",
-                                    job_name
-                                );
+                    if let Ok(elapsed_duration) = elapsed.to_std() {
+                        if elapsed_duration > job_metadata.lock_ttl {
+                            if let Err(err) = repository.release_lock(&job_name).await {
+                                eprintln!("Failed to release lock for job {:?}: {}", job_name, err);
                             }
-                        },
-                        chrono::LocalResult::None => {
-                            eprintln!("Failed to convert last_run timestamp to DateTime<Utc> for job {:?}", job_name);
                         }
-                        _ => {}
+                    } else {
+                        info!(
+                            "Warning: Negative elapsed time for job {:?}, skipping comparison.",
+                            job_name
+                        );
                     }
                 }
             }
@@ -242,6 +228,52 @@ where
         }
     }
 }
+
+//TODO : Not used as of now
+//     async fn monitor_jobs(repository: Arc<dyn Repo>, jobs: Arc<Mutex<Vec<JobMetadata>>>) {
+//         loop {
+//             let jobs = jobs.lock().await.clone();
+//
+//             for job_metadata in jobs.iter() {
+//                 let job_name = job_metadata.name.0.clone();
+//
+//                 if let Ok(Some(last_run)) = repository.get_last_run_time(&job_name).await {
+//                     let now = Utc::now();
+//
+//                     let last_run_dt_opt = Utc.timestamp_millis_opt(last_run);
+//                     match last_run_dt_opt {
+//                         chrono::LocalResult::Single(last_run_dt) => {
+//                             let elapsed = now - last_run_dt;
+//                             eprintln!(
+//                                 "Job: {:?}, now: {:?}, last_run: {:?}, elapsed: {:?}",
+//                                 job_name, now, last_run, elapsed
+//                             );
+//
+//                             if let Ok(elapsed_duration) = elapsed.to_std() {
+//                                 if elapsed_duration > job_metadata.lock_ttl {
+//                                     eprintln!("Job {:?} appears stuck. Releasing lock.", job_name);
+//                                     if let Err(err) = repository.release_lock(&job_name).await {
+//                                         eprintln!("Failed to release lock for job {:?}: {}", job_name, err);
+//                                     }
+//                                 }
+//                             } else {
+//                                 eprintln!(
+//                                     "Warning: Negative elapsed time for job {:?}, skipping comparison.",
+//                                     job_name
+//                                 );
+//                             }
+//                         },
+//                         chrono::LocalResult::None => {
+//                             eprintln!("Failed to convert last_run timestamp to DateTime<Utc> for job {:?}", job_name);
+//                         }
+//                         _ => {}
+//                     }
+//                 }
+//             }
+//             tokio::time::sleep(Duration::from_secs(10)).await;
+//         }
+//     }
+// }
 
 // pub async fn start<F>(&self, job_func: F) -> Result<(), JobError>
     // where

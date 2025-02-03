@@ -283,7 +283,7 @@ impl Repo for TheRepository {
             if lock_status.as_deref() == Some("LOCKED") {
                 return Ok(true);
             } else {
-                let update_query = "UPDATE job.jobs USING TTL 30 SET lock_status = 'LOCKED', owner = ? ,lock_timestamp = toTimestamp(now()) WHERE name = ? IF lock_status  IN ('UNLOCKED', null)";
+                let update_query = "UPDATE job.jobs SET lock_status = 'LOCKED', owner = ? ,lock_timestamp = toTimestamp(now()) WHERE name = ? IF lock_status  IN ('UNLOCKED', null)";
                 let mut update_statement = self.session.statement(update_query);
                 update_statement.bind(0, self.hostname.as_str()).map_err(|e| RepoError {
                     target: "owner".to_string(),
@@ -399,7 +399,6 @@ impl Repo for TheRepository {
                 return Ok(());
             }
         }
-
         Err(RepoError {
             target: name.to_string(),
             kind: ErrorKind::AcquireLockFailed(
