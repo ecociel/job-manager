@@ -47,8 +47,8 @@ fn main() {
                     }
                 };
 
-                // println!("Simulating a long-running job...");
-                // tokio::time::sleep(Duration::from_secs(30)).await;
+                println!("Simulating a long-running job...");
+                tokio::time::sleep(Duration::from_secs(30)).await;
 
                 let response = client
                     .get("https://api.api-ninjas.com/v1/interestrate")

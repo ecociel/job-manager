@@ -82,7 +82,7 @@ where
                         let lock_acquired = repository_clone1
                             .acquire_lock(&job_name)
                             .await
-                            .unwrap_or(false);
+                            .unwrap_or(false); //TODO Fix this
 
                         eprintln!("Lock acquired for job {:?}: {:?}", job_clone.name, lock_acquired);
                         let repository_clone2 = repository_clone.clone(); //TODO Fix this
@@ -90,18 +90,26 @@ where
                             let lock_ttl = job_clone.lock_ttl;
                             let lock_toucher_handle = spawn(async move {
                                 let mut ttl = lock_ttl;
+                                let min_ttl = Duration::from_secs(1);
                                 loop {
-                                    let half_ttl_secs = ttl.as_secs() / 2;
-                                    let half_ttl_duration = Duration::from_secs(half_ttl_secs);
-                                    sleep(half_ttl_duration).await;
-                                    let update_result = repository_clone2.update_lock_ttl(&job_name, ttl).await;
-                                    if let Err(e) = update_result {
-                                        eprintln!("Error updating TTL for job {}",e);
-                                    } else {
-                                        eprintln!("Lock TTL updated for job");
-                                    }
+                                    if ttl > min_ttl {
+                                        let half_ttl_secs = ttl.as_secs() / 2;
+                                        let half_ttl_duration = Duration::from_secs(half_ttl_secs);
+
+                                        sleep(half_ttl_duration).await;
+
+                                        let update_result = repository_clone2.update_lock_ttl(&job_name, ttl).await;
+                                        if let Err(e) = update_result {
+                                            eprintln!("Error updating TTL for job {}", e);
+                                        } else {
+                                            eprintln!("Lock TTL updated for job to {:?}", ttl);
+                                        }
                                     ttl /= 2;
-                                    if ttl <= Duration::from_secs(1) {
+                                        if ttl <= min_ttl {
+                                            eprintln!("Lock TTL has reached minimum threshold of {:?}, stopping further updates", min_ttl);
+                                            break;
+                                        } } else {
+                                        eprintln!("Lock TTL is too small to continue updating. Stopping.");
                                         break;
                                     }
                                 }

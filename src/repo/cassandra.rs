@@ -19,6 +19,7 @@ use gethostname::gethostname;
 use crate::jobs::JobStatus;
 use crate::schedule::JobSchedule;
 
+
 #[derive(Clone, Debug)]
 pub struct TheRepository {
     session: Session,
@@ -284,7 +285,7 @@ impl Repo for TheRepository {
             if lock_status.as_deref() == Some("LOCKED") {
                 return Ok(true);
             } else {
-                let update_query = "UPDATE job.jobs SET lock_status = 'LOCKED', owner = ? ,lock_timestamp = toTimestamp(now()) WHERE name = ? IF lock_status  IN ('UNLOCKED', null)";
+                let update_query = "UPDATE job.jobs USING TTL 30 SET lock_status = 'LOCKED', owner = ? ,lock_timestamp = toTimestamp(now()) WHERE name = ? IF lock_status  IN ('UNLOCKED', null)";
                 let mut update_statement = self.session.statement(update_query);
                 update_statement.bind(0, self.hostname.as_str()).map_err(|e| RepoError {
                     target: "owner".to_string(),
@@ -346,54 +347,71 @@ impl Repo for TheRepository {
         })
     }
 
-    //TODO : I need to fix this. Problem is when lock_status is unlocked
     async fn release_lock(&self, name: &str) -> Result<(), RepoError> {
+
         let query = "UPDATE job.jobs
                 SET owner = NULL, lock_status = 'UNLOCKED'
                 WHERE name = ?
                 IF lock_status = 'LOCKED' AND owner != NULL";
-        let mut statement = self.session.statement(query);
-        statement.bind(0, name).map_err(|e| {
-            RepoError {
-                target: "name".to_string(),
-                kind: ErrorKind::BindError(e.into()),
-            }
-        })?;
-        // statement
-        //     .bind(1, self.hostname.as_str())
-        //     .map_err(|e| RepoError {
-        //         target: "owner".to_string(),
-        //         kind: ErrorKind::BindError(e.into()),
-        //     })?;
 
-        let result = statement.execute().await.map_err(|e| {
-            RepoError {
-                target: "job.jobs".to_string(),
-                kind: ErrorKind::ExecuteError(e.into()),
-            }
+        let mut statement = self.session.statement(query);
+        statement.bind(0, name).map_err(|e| RepoError {
+            target: "name".to_string(),
+            kind: ErrorKind::BindError(e.into()),
         })?;
+
+        let result = statement.execute().await.map_err(|e| RepoError {
+            target: "job.jobs".to_string(),
+            kind: ErrorKind::ExecuteError(e.into()),
+        })?;
+
         if let Some(row) = result.first_row() {
             let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
                 target: "job.jobs - [applied] status".to_string(),
                 kind: ErrorKind::BindError(e.into()),
             })?;
 
-            return if applied {
-                Ok(())
-            } else {
-                Err(RepoError {
-                    target: name.to_string(),
-                    kind: ErrorKind::AcquireLockFailed(
-                        "Failed to release lock: lock_status did not match.".to_string(),
-                    ),
-                })
+            if applied {
+                return Ok(());
             }
         }
-        Err(RepoError {
+        let query_null_case = "UPDATE job.jobs
+                SET owner = NULL, lock_status = 'UNLOCKED'
+                WHERE name = ?
+                IF lock_status = NULL AND owner = NULL";
+
+        let mut statement_null = self.session.statement(query_null_case);
+        statement_null.bind(0, name).map_err(|e| RepoError {
+            target: "name".to_string(),
+            kind: ErrorKind::BindError(e.into()),
+        })?;
+
+        let result_null = statement_null.execute().await.map_err(|e| RepoError {
             target: "job.jobs".to_string(),
-            kind: ErrorKind::AcquireLockFailed("Failed to release lock due to unknown reasons.".to_string()),
+            kind: ErrorKind::ExecuteError(e.into()),
+        })?;
+
+        if let Some(row) = result_null.first_row() {
+            let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
+                target: "job.jobs - [applied] status".to_string(),
+                kind: ErrorKind::BindError(e.into()),
+            })?;
+
+            if applied {
+                return Ok(());
+            }
+        }
+
+        Err(RepoError {
+            target: name.to_string(),
+            kind: ErrorKind::AcquireLockFailed(
+                "Failed to release lock: lock_status did not match.".to_string(),
+            ),
         })
     }
+
+
+
 
     // async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
     //     let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status FROM jobs WHERE name = ?;";
@@ -587,6 +605,8 @@ impl From<cassandra_cpp::Error> for LoadError {
 #[derive(Debug)]
 pub struct CassandraErrorKind(String);
 
+
+
 impl From<cassandra_cpp::Error> for CassandraErrorKind {
     fn from(error: cassandra_cpp::Error) -> Self {
         CassandraErrorKind(format!("{}", error))
@@ -613,7 +633,8 @@ pub enum ErrorKind {
     RowAlreadyExists,
     InvalidConfig(String),
     AcquireLockFailed(String),
-    UpdateLockTtlFailed(String),
+    UpdateLockTtlFailed(CassandraErrorKind),
+
     NotFound,
 }
 
