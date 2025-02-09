@@ -64,7 +64,7 @@ where
             return Ok(());
         }
 
-        let mut handles: Vec<JoinHandle<()>> = Vec::new();
+        let mut handles: Vec<JoinHandle<Result<(), JobError>>> = Vec::new();
 
         for job in jobs.iter() {
             let repository_clone = self.repository.clone();
@@ -98,7 +98,10 @@ where
                             }
                         };
                             if let Err(e) = result {
-                                eprintln!("Job execution error: {}", e);
+                                return Err(JobError::JobExecutionFailed(format!(
+                                    "Job {:?} execution failed: {}",
+                                    job_clone.name, e
+                                )));
                             }
                             lock_toucher_handle.abort();
                             if let Err(err) = repository_clone.release_lock(&job_clone.name.0).await {
@@ -190,7 +193,7 @@ where
                eprintln!("Lock TTL updated for job {:?} to {:?}", job_name, new_ttl);
                 ttl = new_ttl;
             } else {
-                eprintln!("Lock TTL too small, stopping updates.");
+                warn!("Lock TTL too small, stopping updates.");
                 break;
             }
         }
