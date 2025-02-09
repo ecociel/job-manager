@@ -20,7 +20,6 @@ pub struct Manager<R>
 where
     R: Repo + Send + Sync + 'static,
 {
-    job_instance: String, // TODO: NEVER USED
     repo: Arc<R>,
     pub job_executor:  Arc<JobExecutor<R>>,
     pub(crate) jobs: Arc<Mutex<Vec<(JobCfg,JobFn)>>>,
@@ -28,16 +27,14 @@ where
 
 
 impl<R: Repo + Sync + Send + 'static> Manager<R> {
-    pub fn new(job_instance: String, repo: R) -> Self {
+    pub fn new(repo: R) -> Self {
         let repo_arc = Arc::new(repo);
         let jobs = Arc::new(Mutex::new(vec![]));
         let job_executor = Arc::new(JobExecutor {
-            id: "executor_1".to_string(), //TODO - Need to fix this!!
             jobs: jobs.clone(),
             repository: repo_arc.clone(),
         });
         Manager {
-            job_instance,
             repo: repo_arc.clone(),
             job_executor,
             jobs: Arc::new(Mutex::new(vec![])),

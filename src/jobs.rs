@@ -11,7 +11,6 @@ use crate::schedule::JobSchedule;
 
 #[derive(Clone, Debug)]
 pub struct JobMetadata {
-    //TODO: As we proceed and more clear about implmentation we keep adding
     pub name: JobName,
     pub state: Arc<Mutex<Vec<u8>>>,
     pub last_run: DateTime<Utc>,

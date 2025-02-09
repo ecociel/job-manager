@@ -18,7 +18,7 @@ fn main() {
         )
             .await
             .unwrap();
-        let mut manager = manager::Manager::new("job-instance-1".to_string(), repo.clone());
+        let mut manager = manager::Manager::new(repo.clone());
 
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
