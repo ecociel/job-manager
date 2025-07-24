@@ -1,23 +1,23 @@
-[package]
-name = "job"
-version = "0.1.0"
+[workspace]
+members = [
+    "crates/job-core", "job",
+]
+
+[workspace.package]
 edition = "2021"
+version = "0.1.0"
+repository = "https://github.com/ecociel/job-manager"
 
-[dependencies]
-
+[workspace.dependencies]
 async-trait = "0.1.83"
 anyhow = "1.0.94"
 tokio = { version = "1.42.0", features = ["full"] }
 chrono = "0.4.37"
 cassandra-cpp = "3.0.2"
-cron = { version = "0.12.0"}
+cron = "0.12.0"
 serde = { version = "1.0", features = ["derive"] }
 reqwest = { version = "0.11", features = ["json"] }
 hostname = "0.3"
 gethostname = "0.3"
 log = "0.4.25"
 derive_more = "0.99"
-
-#[[examples]]
-#name = "examples"
-
