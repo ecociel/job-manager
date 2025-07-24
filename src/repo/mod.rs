@@ -1,12 +1,10 @@
-use std::eprintln;
 use std::sync::Arc;
 use std::time::Duration;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use cron::Schedule;
 use tokio::sync::Mutex;
-use crate::{JobMetadata, JobName};
-use crate::cassandra::{ErrorKind, RepoError};
+use crate::JobName;
+use crate::cassandra::RepoError;
 use crate::jobs::JobStatus;
 use crate::schedule::JobSchedule;
 

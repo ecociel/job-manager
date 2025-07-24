@@ -1,17 +1,13 @@
-use std::cmp::PartialEq;
 use crate::error::JobError;
 use crate::executor::JobExecutor;
 use crate::jobs::{JobCfg, JobMetadata, JobStatus};
-use crate::JobName;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 use chrono::Utc;
 use tokio::sync::Mutex;
-use log::{info, warn};
+use log::info;
 use crate::repo::Repo;
-use crate::schedule::JobSchedule;
 
 type JobFn = Arc<dyn Fn(Vec<u8>) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, JobError>> + Send>> + Send + Sync>;
 

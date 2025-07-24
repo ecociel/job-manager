@@ -1,16 +1,14 @@
 use std::future::Future;
 use std::pin::Pin;
 use crate::JobMetadata;
-use chrono::{DateTime, MappedLocalTime, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use std::sync::Arc;
 use log::{info, warn};
-use tokio::{signal, spawn};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout};
 use crate::error::JobError;
 use crate::jobs::JobStatus;
-use crate::manager::Manager;
 use crate::repo::Repo;
 use tokio::time::Duration;
 
@@ -68,7 +66,7 @@ where
 
         for job in jobs.iter() {
             let repository_clone = self.repository.clone();
-            let mut job_clone = job.clone();
+            let job_clone = job.clone();
             let state_clone = job.state.clone();
             let job_func_clone = job_func.clone();
             let repository_clone1 = repository_clone.clone();

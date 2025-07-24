@@ -5,13 +5,11 @@ use crate::repo::cassandra::ErrorKind::{
 use cassandra_cpp::{AsRustType, BindRustType, Cluster, Session};
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
-use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
-use cron::Schedule;
-use crate::{JobMetadata, JobName};
+use crate::JobName;
 use tokio::sync::Mutex;
 use crate::cassandra::ErrorKind::{CustomError, RowAlreadyExists};
 use crate::repo::Repo;
@@ -158,14 +156,14 @@ impl Repo for TheRepository {
         Ok(())
     }
 
-     async fn update_lock_ttl(&self, name: &str, ttl: Duration) -> Result<(), RepoError> {
+    async fn update_lock_ttl(&self, name: &str, ttl: Duration) -> Result<(), RepoError> {
         let query = "
         UPDATE job.jobs
         SET lock_ttl = ?
         WHERE name = ? IF lock_status = 'LOCKED'";
 
         let mut statement = self.session.statement(query);
-         let ttl_seconds = ttl.as_secs() as i32;
+        let ttl_seconds = ttl.as_secs() as i32;
         statement.bind(0, ttl_seconds).map_err(|e| RepoError {
             target: "lock_ttl".to_string(),
             kind: ErrorKind::BindError(e.into()),
@@ -179,25 +177,25 @@ impl Repo for TheRepository {
             kind: ErrorKind::ExecuteError(e.into()),
         })?;
 
-         if let Some(row) = result.first_row() {
-             let app: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
-                 target: "jobs - [applied] status".to_string(),
-                 kind: ExecuteError(e.into()),
-             })?;
+        if let Some(row) = result.first_row() {
+            let app: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
+                target: "jobs - [applied] status".to_string(),
+                kind: ExecuteError(e.into()),
+            })?;
 
-             if !app {
-                 return Err(RepoError {
-                     target: name.clone().parse().unwrap(),
-                     kind: RowAlreadyExists,
-                 });
-             }
-         }
+            if !app {
+                return Err(RepoError {
+                    target: name.clone().parse().unwrap(),
+                    kind: RowAlreadyExists,
+                });
+            }
+        }
 
-         Ok(())
+        Ok(())
     }
 
     //TODO: Rename the query if required or choose state or status ???
-    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>,last_run: DateTime<Utc>) -> Result<(), RepoError> {
+    async fn save_and_commit_state(&self, name: &JobName, status: JobStatus, state: Vec<u8>, last_run: DateTime<Utc>) -> Result<(), RepoError> {
         let mut statement = self.session.statement(
             "SELECT name FROM job.jobs WHERE name = ?;",
         );
@@ -278,7 +276,7 @@ impl Repo for TheRepository {
         })?;
 
         if let Some(row) = exists_result.first_row() {
-            let mut lock_status: Option<String> = row.get_by_name("lock_status").ok();
+            let lock_status: Option<String> = row.get_by_name("lock_status").ok();
 
             if lock_status.as_deref() == Some("LOCKED") {
                 return Ok(true);
@@ -346,7 +344,6 @@ impl Repo for TheRepository {
     }
 
     async fn release_lock(&self, name: &str) -> Result<(), RepoError> {
-
         let query = "UPDATE job.jobs
                 SET owner = NULL, lock_status = 'UNLOCKED'
                 WHERE name = ?
@@ -423,7 +420,6 @@ impl Repo for TheRepository {
         })?;
 
         if let Some(row) = result.first_row() {
-
             let last_run_timestamp: i64 = row.get_by_name("last_run").map_err(|e| RepoError {
                 target: "job.jobs - last_run".to_string(),
                 kind: ErrorKind::ColumnError(e.into()),
@@ -442,174 +438,6 @@ impl Repo for TheRepository {
         }
         Ok(None)
     }
-
-
-
-
-    // async fn get_job_info(&self, name: &JobName) -> Result<JobMetadata, RepoError> {
-    //     let query = "SELECT name, backoff_duration, check_interval,  last_run, lock_ttl, max_retries, retry_attempts, schedule, state, status FROM jobs WHERE name = ?;";
-    //     let mut statement = self.session.statement(query);
-    //
-    //     statement.bind(0, name.0.as_str()).map_err(|e| RepoError {
-    //         target: name.0.clone(),
-    //         kind: ErrorKind::BindError(e.into()),
-    //     })?;
-    //
-    //     let result = statement.execute().await.map_err(|e| RepoError {
-    //         target: "job.jobs".to_string(),
-    //         kind: ErrorKind::ExecuteError(e.into()),
-    //     })?;
-    //
-    //     if let Some(row) = result.first_row() {
-    //         let check_interval_secs: i64 = row
-    //             .get_by_name("check_interval")
-    //             .map_err(|_| RepoError {
-    //                 target: "check_interval".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid check_interval".to_string()),
-    //             })?;
-    //         let lock_ttl_secs: i64 = row
-    //             .get_by_name("lock_ttl")
-    //             .map_err(|_| RepoError {
-    //                 target: "lock_ttl".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid lock_ttl".to_string()),
-    //             })?;
-    //         let schedule_str: String = row
-    //             .get_by_name("schedule")
-    //             .map_err(|_| RepoError {
-    //                 target: "schedule".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid schedule".to_string()),
-    //             })?;
-    //         let state_bytes: Vec<u8> = row
-    //             .get_by_name("state")
-    //             .map_err(|_| RepoError {
-    //                 target: "state".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid state".to_string()),
-    //             })?;
-    //         let last_run_str: Option<String> = row.get_by_name("last_run").ok(); // `Option<String>` to handle NULL
-    //         let retry_attempts: i32 = row
-    //             .get_by_name("retry_attempts")
-    //             .map_err(|_| RepoError {
-    //                 target: "retry_attempts".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid retry_attempts".to_string()),
-    //             })?;
-    //         let max_retries: i32 = row
-    //             .get_by_name("max_retries")
-    //             .map_err(|_| RepoError {
-    //                 target: "max_retries".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid max_retries".to_string()),
-    //             })?;
-    //         let backoff_duration_secs: i64 = row
-    //             .get_by_name("backoff_duration")
-    //             .map_err(|_| RepoError {
-    //                 target: "backoff_duration".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid backoff_duration".to_string()),
-    //             })?;
-    //
-    //         let check_interval = Duration::from_secs(check_interval_secs as u64);
-    //         let lock_ttl = Duration::from_secs(lock_ttl_secs as u64);
-    //         let schedule = Schedule::from_str(&schedule_str).map_err(|_| RepoError {
-    //             target: "schedule".to_string(),
-    //             kind: ErrorKind::InvalidConfig("Schedule parse error".to_string()),
-    //         })?;
-    //
-    //         let state = Arc::new(Mutex::new(state_bytes));
-    //
-    //         let last_run = match last_run_str {
-    //             Some(ts) => DateTime::parse_from_rfc3339(&ts)
-    //                 .map_err(|_e| RepoError {                        //TODO FIX ERROR
-    //                     target: "last_run".to_string(),
-    //                     kind: ErrorKind::InvalidConfig("Last run parse error".to_string()),
-    //                 })?
-    //                 .with_timezone(&Utc),
-    //             None => Utc::now(),
-    //         };
-    //
-    //         let status: String = row
-    //             .get_by_name("status")
-    //             .map_err(|_| RepoError {
-    //                 target: "status".to_string(),
-    //                 kind: ErrorKind::InvalidConfig("Missing or invalid status".to_string()),
-    //             })?;
-    //         let job_status = JobStatus::from_string(&status);
-    //         let backoff_duration = Duration::from_secs(backoff_duration_secs as u64);
-    //         Ok(JobMetadata {
-    //             name: name.clone(),
-    //             backoff_duration,
-    //             check_interval,
-    //             last_run,
-    //             lock_ttl,
-    //             max_retries: max_retries as u32,
-    //             retry_attempts: retry_attempts as u32,
-    //             schedule,
-    //             state,
-    //             status: job_status
-    //         })
-    //     } else {
-    //         Err(RepoError {
-    //             target: name.0.clone(),
-    //             kind: ErrorKind::NotFound,
-    //         })
-    //     }
-    // }
-
-    // async fn release_all_locks(&self) -> Result<(), RepoError> {
-    //     let select_query = "SELECT job_name FROM job.locks WHERE lock_status = 'LOCKED' ALLOW FILTERING";
-    //     let mut select_stmt = self.session.statement(select_query);
-    //
-    //     let result = select_stmt.execute().await.map_err(|e| RepoError {
-    //         target: "job.locks".to_string(),
-    //         kind: ErrorKind::ExecuteError(e.into()),
-    //     })?;
-    //
-    //     let mut job_names: Vec<String> = Vec::new();
-    //
-    //     for row in result.first_row() {
-    //         let job_name: String = row.get_by_name("job_name").map_err(|e| RepoError {
-    //             target: "job_name".to_string(),
-    //             kind: ErrorKind::ColumnError(e.into()),
-    //         })?;
-    //         job_names.push(job_name);
-    //     }
-    //
-    //     if job_names.is_empty() {
-    //         eprintln!("No active locks found for this instance.");
-    //         return Ok(());
-    //     }
-    //
-    //     let update_query = "UPDATE job.locks SET owner = null, lock_status = 'UNLOCKED' WHERE job_name = ? IF lock_status = 'LOCKED'";
-    //
-    //     for job_name in job_names {
-    //         let mut update_stmt = self.session.statement(update_query);
-    //
-    //         update_stmt.bind(0, job_name.as_str()).map_err(|e| RepoError {
-    //             target: job_name.clone(),
-    //             kind: ErrorKind::BindError(e.into()),
-    //         })?;
-    //
-    //         let result = update_stmt.execute().await.map_err(|e| RepoError {
-    //             target: job_name.clone(),
-    //             kind: ErrorKind::ExecuteError(e.into()),
-    //         })?;
-    //
-    //         if let Some(row) = result.first_row() {
-    //             let applied: bool = row.get_by_name("[applied]").map_err(|e| RepoError {
-    //                 target: format!("job.locks - [applied] status for {}", job_name),
-    //                 kind: ErrorKind::ColumnError(e.into()),
-    //             })?;
-    //
-    //             if applied {
-    //                 eprintln!("Lock released for job: {}", job_name);
-    //             } else {
-    //                 eprintln!(
-    //                     "Warning: Lock for job {} was not released. It may have been acquired by another instance.",
-    //                     job_name
-    //                 );
-    //             }
-    //         }
-    //     }
-    //
-    //     Ok(())
-    // }
 }
 
 #[derive(Debug)]
@@ -666,7 +494,7 @@ pub enum ErrorKind {
     RowAlreadyExists,
     InvalidConfig(String),
     AcquireLockFailed(String),
-    UpdateLockTtlFailed(CassandraErrorKind),
+    //UpdateLockTtlFailed(CassandraErrorKind),
     CustomError(String),
     NotFound,
 }
@@ -697,7 +525,7 @@ impl Display for RepoError {
             ExecuteError(err) => write!(f, "error in executing query:{}-{}", self.target, err),
             ColumnError(err) => write!(f, "error in fetching column:{}-{}", self.target, err),
             InvalidTimeStamp => write!(f, "Invalid timestamp:{}", self.target),
-            UpdateLockTtlFailed => write!(f,"Failed to update lock to ttl"),
+            //UpdateLockTtlFailed => write!(f,"Failed to update lock to ttl"),
             CustomError(err) => write!(f,"Error: {}", err),
             ErrorKind::RowAlreadyExists => write!(
                 f,
