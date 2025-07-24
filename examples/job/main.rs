@@ -1,13 +1,13 @@
 use std::env;
 use std::future::Future;
 use std::pin::Pin;
-use job::cassandra::TheRepository;
-use job::error::JobError;
-use job::{manager, JobCfg, JobName};
+use job_manager::cassandra::TheRepository;
+use job_manager::error::JobError;
+use job_manager::{manager, JobCfg, JobName};
 use std::time::Duration;
 use reqwest::Client;
 use tokio::runtime::Runtime;
-use job::schedule::JobSchedule;
+use job_manager::schedule::JobSchedule;
 
 fn main() {
     let rt = Runtime::new().expect("Failed to create Tokio runtime");
@@ -19,7 +19,6 @@ fn main() {
             .await
             .unwrap();
         let mut manager = manager::Manager::new(repo.clone());
-
         let client = Client::builder()
             .danger_accept_invalid_certs(true)
             .build()
@@ -29,7 +28,7 @@ fn main() {
             name: JobName("job1".to_string()),
             check_interval: Duration::from_secs(5),
             lock_ttl: Duration::from_secs(30),
-            schedule: JobSchedule::secondly(),
+            schedule: JobSchedule::every_n_seconds(10),
             retry_attempts: 1,
             max_retries: 3,
             backoff_duration: Duration::from_secs(2),

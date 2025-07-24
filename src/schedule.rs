@@ -47,5 +47,14 @@ impl JobSchedule {
     pub fn every_five_minutes() -> Self {
         Self::new("0 */5 * * * *").expect("every_five_minutes cron expression should parse")
     }
+    pub fn every_n_seconds(n: u32) -> Self {
+        Self::new(&format!("*/{} * * * * *", n))
+            .expect("every_n_seconds cron expression should parse")
+    }
+
+    pub fn every_n_minutes(n: u32) -> Self {
+        Self::new(&format!("0 */{} * * * *", n))
+            .expect("every_n_minutes cron expression should parse")
+    }
 }
 
