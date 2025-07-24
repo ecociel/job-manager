@@ -50,7 +50,7 @@ fn main() {
                 tokio::time::sleep(Duration::from_secs(10)).await;
 
                 let response = client
-                    .get("https://api.aviationstack.com/v1/timetable?access_key=38ac1cbd0924aa9c61b7556cab4c6d1e&iataCode=JFK&type=arrival&limit=10")
+                    .get("https://api.aviationstack.com/v1/timetable?access_key=JFK&iataCode=%s&type=arrival&limit=10")
                     .header("X-Api-Key", api_key)
                     .send()
                     .await
